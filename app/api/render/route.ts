@@ -1,45 +1,42 @@
 // app/api/render/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { writeFile, mkdir } from "node:fs/promises";
+import { writeFile, mkdir, readFile, rm } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import ffmpeg from "fluent-ffmpeg";
 import ffmpegStatic from "ffmpeg-static";
 
-// FFmpeg precisa do runtime Node (não Edge) e de execução dinâmica.
+// FFmpeg exige runtime Node (não Edge) e execução dinâmica.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60; // segundos (ajuste conforme seu host)
+export const maxDuration = 60; // segundos (limite depende do seu plano Vercel)
 
 // Aponta o fluent-ffmpeg para o binário do ffmpeg-static.
-// Sem isto, ele procura "ffmpeg" no PATH do sistema e falha com ENOENT.
 if (ffmpegStatic) {
   ffmpeg.setFfmpegPath(ffmpegStatic as unknown as string);
 }
 
 /**
- * Gera um slideshow vertical 1080x1920 a partir de imagens nomeadas
- * 1.png, 2.png, ... dentro de `dir`. Cada imagem aparece 3 segundos.
+ * Gera um slideshow vertical 1080x1920 a partir de 1.png, 2.png, ...
+ * dentro de `dir`. Cada imagem aparece 3 segundos.
  */
 function renderVideo(dir: string, outputPath: string): Promise<void> {
   return new Promise((resolve, reject) => {
     ffmpeg()
       .input(path.join(dir, "%d.png"))
-      // -framerate 1/3 => cada imagem dura 3s. -start_number 1 => começa em 1.png
       .inputOptions(["-framerate", "1/3", "-start_number", "1"])
       .videoFilters([
-        // encaixa a imagem dentro de 1080x1920 sem distorcer...
         "scale=1080:1920:force_original_aspect_ratio=decrease",
-        // ...e preenche o resto com preto (letterbox/pillarbox)
         "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black",
         "setsar=1",
         "format=yuv420p",
       ])
       .outputOptions([
-        "-r", "30",              // 30 fps de saída
+        "-r", "30",
         "-c:v", "libx264",
         "-preset", "veryfast",
-        "-pix_fmt", "yuv420p",   // compatível com todos os players/navegadores
+        "-pix_fmt", "yuv420p",
         "-movflags", "+faststart",
       ])
       .on("start", (cmd) => console.log("[render] ffmpeg:", cmd))
@@ -51,10 +48,15 @@ function renderVideo(dir: string, outputPath: string): Promise<void> {
 
 export async function POST(req: NextRequest) {
   const jobId = randomUUID();
+
+  // IMPORTANTE: na Vercel, /public e /var/task são somente leitura.
+  // O único lugar gravável no ambiente serverless é o diretório temporário do SO.
+  // os.tmpdir() resolve para /tmp na Vercel e para o tmp local na sua máquina.
+  const tmpDir = path.join(os.tmpdir(), "viralcut-renders", jobId);
+
   try {
     const form = await req.formData();
 
-    // Coleta TODAS as imagens, independente do nome do campo (image1, images, etc.)
     const files: File[] = [];
     for (const value of form.values()) {
       if (value instanceof File && value.size > 0) files.push(value);
@@ -67,28 +69,33 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Salva em public/renders/{jobId}/1.png, 2.png, ...
-    const dir = path.join(process.cwd(), "public", "renders", jobId);
-    await mkdir(dir, { recursive: true });
+    // Cria o diretório temporário gravável.
+    await mkdir(tmpDir, { recursive: true });
 
+    // Salva as imagens como 1.png, 2.png, ... (ffmpeg detecta o formato pelo conteúdo).
     for (let i = 0; i < files.length; i++) {
       const buffer = Buffer.from(await files[i].arrayBuffer());
-      // Salvamos sempre como .png; o ffmpeg detecta o formato real pelo conteúdo,
-      // então JPG/WEBP salvos com este nome também decodificam normalmente.
-      await writeFile(path.join(dir, `${i + 1}.png`), buffer);
+      await writeFile(path.join(tmpDir, `${i + 1}.png`), buffer);
     }
 
-    const outputPath = path.join(dir, "video.mp4");
-    await renderVideo(dir, outputPath);
+    // Gera o MP4 dentro do mesmo tmpDir.
+    const outputPath = path.join(tmpDir, "video.mp4");
+    await renderVideo(tmpDir, outputPath);
 
-    return NextResponse.json({
-      ok: true,
-      jobId,
-      count: files.length,
-      url: `/renders/${jobId}/video.mp4`,
+    // Lê o MP4 e devolve os BYTES diretamente — não dependemos de URL em /public.
+    const videoBuffer = await readFile(outputPath);
+
+    return new NextResponse(new Uint8Array(videoBuffer), {
+      status: 200,
+      headers: {
+        "Content-Type": "video/mp4",
+        "Content-Length": String(videoBuffer.length),
+        "Content-Disposition": `attachment; filename="viralcut-${jobId}.mp4"`,
+        "Cache-Control": "no-store",
+      },
     });
   } catch (err) {
-    // Sempre devolve JSON válido — nunca uma página HTML de erro.
+    // Em erro, sempre JSON válido (nunca HTML).
     console.error("[render] ERRO:", err);
     return NextResponse.json(
       {
@@ -98,5 +105,8 @@ export async function POST(req: NextRequest) {
       },
       { status: 500 }
     );
+  } finally {
+    // Limpa o tmp (efêmero na Vercel, mas evita acúmulo localmente / entre invocações).
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
 }

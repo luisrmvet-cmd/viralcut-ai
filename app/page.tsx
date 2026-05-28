@@ -33,23 +33,18 @@ export default function Home() {
 
       // Lê como texto primeiro: assim, se o backend devolver HTML de erro,
       // mostramos a causa real em vez de quebrar no JSON.parse.
-      const text = await res.text();
-      let data: { ok?: boolean; url?: string; error?: string };
-      try {
-        data = JSON.parse(text);
-      } catch {
-        throw new Error(
-          `Resposta inválida do servidor (HTTP ${res.status}): ${text.slice(0, 200)}`
-        );
-      }
+      const contentType = res.headers.get("content-type") || "";
 
-      if (!res.ok || !data.ok || !data.url) {
-        throw new Error(data?.error || `Erro HTTP ${res.status}`);
-      }
+if (!res.ok || contentType.includes("application/json")) {
+const text = await res.text();
+throw new Error(text);
+}
 
-      setVideoUrl(data.url);
-      // Abre o MP4 em nova aba automaticamente.
-      window.open(data.url, "_blank");
+const blob = await res.blob();
+const url = URL.createObjectURL(blob);
+
+setVideoUrl(url);
+window.open(url, "_blank");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao enviar imagens.");
     } finally {

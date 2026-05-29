@@ -1,6 +1,7 @@
 // app/api/render/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { writeFile, mkdir, readFile, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -19,6 +20,10 @@ if (ffmpegStatic) {
 const ALLOWED_DURATIONS = [15, 30, 45, 60];
 const FPS = 30;
 const ZOOM = 0.12; // intensidade do zoom (suave)
+
+// === Fase 2B: música de fundo (passo isolado, após o render) ===
+const MUSIC_PATH = path.join(process.cwd(), "public", "music", "background.mp3");
+const MUSIC_VOLUME = 0.15; // 15%
 
 /**
  * Monta os parâmetros do zoompan para cada efeito, alternando por imagem:
@@ -112,6 +117,36 @@ function renderVideo(
   });
 }
 
+/**
+ * Fase 2B — passo ISOLADO de áudio, executado APÓS o render visual.
+ * Faz loop da música, aplica volume 15% e copia o vídeo SEM re-renderizar
+ * (rápido, não re-processa os frames). `-shortest` corta no fim do vídeo,
+ * então a música toca o vídeo inteiro e repete se for mais curta.
+ */
+function mixBackgroundMusic(
+  videoPath: string,
+  musicPath: string,
+  outPath: string
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    ffmpeg()
+      .input(videoPath)
+      .input(musicPath)
+      .inputOptions(["-stream_loop", "-1"]) // loop infinito da música
+      .complexFilter(`[1:a]volume=${MUSIC_VOLUME}[a]`)
+      .outputOptions([
+        "-map", "0:v",
+        "-map", "[a]",
+        "-c:v", "copy", // NÃO re-renderiza o vídeo
+        "-c:a", "aac",
+        "-shortest",
+      ])
+      .on("error", (err) => reject(err))
+      .on("end", () => resolve())
+      .save(outPath);
+  });
+}
+
 export async function POST(req: NextRequest) {
   const jobId = randomUUID();
   const tmpDir = path.join(os.tmpdir(), "viralcut-renders", jobId);
@@ -149,7 +184,20 @@ export async function POST(req: NextRequest) {
     const outputPath = path.join(tmpDir, "video.mp4");
     await renderVideo(tmpDir, outputPath, files.length, secondsPerImage, duration);
 
-    const videoBuffer = await readFile(outputPath);
+    // Fase 2B: adiciona música de fundo se existir (senão, vídeo normal)
+    let deliverPath = outputPath;
+    if (existsSync(MUSIC_PATH)) {
+      const withMusicPath = path.join(tmpDir, "video-music.mp4");
+      try {
+        await mixBackgroundMusic(outputPath, MUSIC_PATH, withMusicPath);
+        if (existsSync(withMusicPath)) deliverPath = withMusicPath;
+      } catch (e) {
+        // se a mixagem falhar, entrega o vídeo SEM música
+        console.error("[render] falha ao adicionar música; vídeo sem áudio:", e);
+      }
+    }
+
+    const videoBuffer = await readFile(deliverPath);
     return new NextResponse(new Uint8Array(videoBuffer), {
       status: 200,
       headers: {

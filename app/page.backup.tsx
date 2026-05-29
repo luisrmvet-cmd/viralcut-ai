@@ -2,17 +2,16 @@
 "use client";
 
 import { useState } from "react";
-// (1) NOVO: histórico
-import { addVideo } from "./lib/videoHistory";
-import VideoHistory from "./components/VideoHistory";
 
 const DURATIONS = [15, 30, 45, 60] as const;
 type Duration = (typeof DURATIONS)[number];
 
-const MAX_DIMENSION = 1920;
+// Compressão client-side: resolve o HTTP 413 (limite ~4,5MB da Vercel) e o HEIC.
+const MAX_DIMENSION = 1920; // lado maior; suficiente p/ 1080x1920
 const JPEG_QUALITY = 0.8;
-const MAX_TOTAL_BYTES = 4 * 1024 * 1024;
+const MAX_TOTAL_BYTES = 4 * 1024 * 1024; // margem de segurança abaixo dos 4,5MB
 
+/** Carrega um File em um HTMLImageElement (decodifica HEIC no iOS via canvas). */
 function loadImage(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -29,26 +28,36 @@ function loadImage(file: File): Promise<HTMLImageElement> {
   });
 }
 
+/**
+ * Redimensiona para no máx. MAX_DIMENSION no lado maior e re-exporta como JPEG.
+ * O canvas sempre gera JPEG -> HEIC do iPhone é convertido automaticamente.
+ * A orientação EXIF é aplicada pelo navegador ao desenhar a imagem.
+ * Em caso de falha de decode (ex.: HEIC em navegador sem suporte), devolve o
+ * arquivo original como fallback.
+ */
 async function compressImage(file: File): Promise<File> {
   try {
     const img = await loadImage(file);
     const scale = Math.min(1, MAX_DIMENSION / Math.max(img.width, img.height));
     const w = Math.max(1, Math.round(img.width * scale));
     const h = Math.max(1, Math.round(img.height * scale));
+
     const canvas = document.createElement("canvas");
     canvas.width = w;
     canvas.height = h;
     const ctx = canvas.getContext("2d");
     if (!ctx) return file;
     ctx.drawImage(img, 0, 0, w, h);
+
     const blob = await new Promise<Blob | null>((res) =>
       canvas.toBlob((b) => res(b), "image/jpeg", JPEG_QUALITY)
     );
     if (!blob) return file;
+
     const name = file.name.replace(/\.[^.]+$/, "") + ".jpg";
     return new File([blob], name, { type: "image/jpeg" });
   } catch {
-    return file;
+    return file; // fallback: envia o original
   }
 }
 
@@ -59,8 +68,6 @@ export default function Home() {
   const [status, setStatus] = useState<string>("");
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // (2) NOVO: chave para atualizar o histórico ao gerar um vídeo
-  const [historyKey, setHistoryKey] = useState(0);
 
   function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     setFiles(Array.from(e.target.files ?? []));
@@ -82,6 +89,7 @@ export default function Home() {
 
     setLoading(true);
     try {
+      // 1) Comprime cada imagem no navegador antes do upload.
       setStatus("Otimizando imagens...");
       const compressed: File[] = [];
       for (let i = 0; i < files.length; i++) {
@@ -97,6 +105,7 @@ export default function Home() {
         );
       }
 
+      // 2) Envia.
       setStatus("Gerando vídeo...");
       const fd = new FormData();
       compressed.forEach((file, i) => fd.append(`image${i + 1}`, file));
@@ -125,15 +134,6 @@ export default function Home() {
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       setVideoUrl(url);
-
-      // (3) NOVO: salva no histórico e atualiza a seção
-      try {
-        await addVideo(blob, duration);
-        setHistoryKey((k) => k + 1);
-      } catch {
-        /* falha ao salvar histórico não impede o uso do vídeo atual */
-      }
-
       window.open(url, "_blank");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao enviar imagens.");
@@ -205,9 +205,6 @@ export default function Home() {
             </a>
           </div>
         )}
-
-        {/* (4) NOVO: seção de histórico */}
-        <VideoHistory refreshKey={historyKey} />
       </div>
     </main>
   );

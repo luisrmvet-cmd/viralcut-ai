@@ -10,7 +10,7 @@ import ffmpegStatic from "ffmpeg-static";
 // FFmpeg exige runtime Node (não Edge) e execução dinâmica.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60; // segundos (limite depende do seu plano Vercel)
+export const maxDuration = 300; // segundos (limite depende do seu plano Vercel)
 
 if (ffmpegStatic) {
   ffmpeg.setFfmpegPath(ffmpegStatic as unknown as string);

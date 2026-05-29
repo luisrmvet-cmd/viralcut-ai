@@ -6,10 +6,66 @@ import { useState } from "react";
 const DURATIONS = [15, 30, 45, 60] as const;
 type Duration = (typeof DURATIONS)[number];
 
+// Compressão client-side: resolve o HTTP 413 (limite ~4,5MB da Vercel) e o HEIC.
+const MAX_DIMENSION = 1920; // lado maior; suficiente p/ 1080x1920
+const JPEG_QUALITY = 0.8;
+const MAX_TOTAL_BYTES = 4 * 1024 * 1024; // margem de segurança abaixo dos 4,5MB
+
+/** Carrega um File em um HTMLImageElement (decodifica HEIC no iOS via canvas). */
+function loadImage(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("decode-failed"));
+    };
+    img.src = url;
+  });
+}
+
+/**
+ * Redimensiona para no máx. MAX_DIMENSION no lado maior e re-exporta como JPEG.
+ * O canvas sempre gera JPEG -> HEIC do iPhone é convertido automaticamente.
+ * A orientação EXIF é aplicada pelo navegador ao desenhar a imagem.
+ * Em caso de falha de decode (ex.: HEIC em navegador sem suporte), devolve o
+ * arquivo original como fallback.
+ */
+async function compressImage(file: File): Promise<File> {
+  try {
+    const img = await loadImage(file);
+    const scale = Math.min(1, MAX_DIMENSION / Math.max(img.width, img.height));
+    const w = Math.max(1, Math.round(img.width * scale));
+    const h = Math.max(1, Math.round(img.height * scale));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return file;
+    ctx.drawImage(img, 0, 0, w, h);
+
+    const blob = await new Promise<Blob | null>((res) =>
+      canvas.toBlob((b) => res(b), "image/jpeg", JPEG_QUALITY)
+    );
+    if (!blob) return file;
+
+    const name = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+    return new File([blob], name, { type: "image/jpeg" });
+  } catch {
+    return file; // fallback: envia o original
+  }
+}
+
 export default function Home() {
   const [files, setFiles] = useState<File[]>([]);
-  const [duration, setDuration] = useState<Duration>(30); // padrão: 30s
+  const [duration, setDuration] = useState<Duration>(30);
   const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState<string>("");
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -18,6 +74,7 @@ export default function Home() {
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     setVideoUrl(null);
     setError(null);
+    setStatus("");
   }
 
   async function handleSubmit() {
@@ -32,14 +89,37 @@ export default function Home() {
 
     setLoading(true);
     try {
+      // 1) Comprime cada imagem no navegador antes do upload.
+      setStatus("Otimizando imagens...");
+      const compressed: File[] = [];
+      for (let i = 0; i < files.length; i++) {
+        setStatus(`Otimizando imagem ${i + 1} de ${files.length}...`);
+        compressed.push(await compressImage(files[i]));
+      }
+
+      const totalBytes = compressed.reduce((s, f) => s + f.size, 0);
+      if (totalBytes > MAX_TOTAL_BYTES) {
+        throw new Error(
+          "As imagens ainda são muito grandes mesmo após otimização. " +
+            "Tente selecionar menos fotos."
+        );
+      }
+
+      // 2) Envia.
+      setStatus("Gerando vídeo...");
       const fd = new FormData();
-      files.forEach((file, i) => fd.append(`image${i + 1}`, file));
-      // Envia a duração escolhida junto ao FormData.
+      compressed.forEach((file, i) => fd.append(`image${i + 1}`, file));
       fd.append("duration", String(duration));
 
       const res = await fetch("/api/render", { method: "POST", body: fd });
-      const contentType = res.headers.get("content-type") ?? "";
 
+      if (res.status === 413) {
+        throw new Error(
+          "Upload muito grande para o servidor. Selecione menos fotos."
+        );
+      }
+
+      const contentType = res.headers.get("content-type") ?? "";
       if (!res.ok || contentType.includes("application/json")) {
         let message = `Erro HTTP ${res.status}`;
         try {
@@ -59,6 +139,7 @@ export default function Home() {
       setError(e instanceof Error ? e.message : "Erro ao enviar imagens.");
     } finally {
       setLoading(false);
+      setStatus("");
     }
   }
 
@@ -68,7 +149,6 @@ export default function Home() {
         <h1 style={styles.title}>ViralCut AI</h1>
         <p style={styles.subtitle}>Transforme suas imagens em Reels verticais</p>
 
-        {/* Upload */}
         <label style={styles.label}>Imagens</label>
         <input
           type="file"
@@ -79,12 +159,9 @@ export default function Home() {
           style={styles.fileInput}
         />
         {files.length > 0 && (
-          <p style={styles.fileHint}>
-            {files.length} imagem(ns) selecionada(s)
-          </p>
+          <p style={styles.fileHint}>{files.length} imagem(ns) selecionada(s)</p>
         )}
 
-        {/* Seletor de duração — estilo CapCut */}
         <label style={{ ...styles.label, marginTop: 22 }}>Duração do Reel</label>
         <div style={styles.durationRow}>
           {DURATIONS.map((value) => {
@@ -107,7 +184,6 @@ export default function Home() {
           })}
         </div>
 
-        {/* Botão principal */}
         <button
           onClick={handleSubmit}
           disabled={loading || files.length === 0}
@@ -116,7 +192,7 @@ export default function Home() {
             ...(loading || files.length === 0 ? styles.ctaDisabled : {}),
           }}
         >
-          {loading ? "Gerando Reels..." : "Criar Reels"}
+          {loading ? status || "Processando..." : "Criar Reels"}
         </button>
 
         {error && <p style={styles.error}>{error}</p>}
@@ -134,11 +210,11 @@ export default function Home() {
   );
 }
 
-/* ---------- estilos (tema escuro premium) ---------- */
 const styles: Record<string, React.CSSProperties> = {
   page: {
     minHeight: "100vh",
-    background: "radial-gradient(1200px 600px at 50% -10%, #14142b 0%, #0a0a0f 55%)",
+    background:
+      "radial-gradient(1200px 600px at 50% -10%, #14142b 0%, #0a0a0f 55%)",
     display: "flex",
     justifyContent: "center",
     alignItems: "flex-start",
@@ -185,11 +261,7 @@ const styles: Record<string, React.CSSProperties> = {
     boxSizing: "border-box",
   },
   fileHint: { margin: "10px 0 0", fontSize: 13, color: "#8b8b96" },
-  durationRow: {
-    display: "flex",
-    gap: 10,
-    width: "100%",
-  },
+  durationRow: { display: "flex", gap: 10, width: "100%" },
   durationBtn: {
     flex: 1,
     minWidth: 0,

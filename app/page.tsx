@@ -22,6 +22,7 @@ const MAX_DIMENSION = 1920;
 const JPEG_QUALITY = 0.8;
 const MAX_TOTAL_BYTES = 4 * 1024 * 1024;
 const MAX_MUSIC_BYTES = 3 * 1024 * 1024; // (Fase 4) limite por MP3 enviado (evita 413 da Vercel)
+const MAX_CAPTION_LEN = 120; // (Fase 5) frase curta
 
 function loadImage(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -70,6 +71,8 @@ export default function Home() {
   // (Fase 4) upload de música própria (opção extra; tem prioridade)
   const [useOwnMusic, setUseOwnMusic] = useState(false);
   const [musicFile, setMusicFile] = useState<File | null>(null);
+  // (Fase 5) NOVO: legenda opcional no vídeo
+  const [caption, setCaption] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string>("");
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -143,6 +146,9 @@ export default function Home() {
       } else {
         fd.append("musicKey", musicKey);
       }
+      // (Fase 5) legenda opcional — só envia se preenchida (request idêntico ao
+      // atual quando vazia)
+      if (caption.trim()) fd.append("caption", caption.trim());
 
       const res = await fetch("/api/render", { method: "POST", body: fd });
 
@@ -266,6 +272,23 @@ export default function Home() {
           </p>
         )}
 
+        {/* (Fase 5) NOVO: legenda opcional no vídeo */}
+        <label style={{ ...styles.label, marginTop: 22 }}>
+          Legenda no vídeo (opcional)
+        </label>
+        <input
+          type="text"
+          value={caption}
+          onChange={(e) => setCaption(e.target.value)}
+          maxLength={MAX_CAPTION_LEN}
+          placeholder="Ex.: Aproveite 50% OFF hoje"
+          disabled={loading}
+          style={styles.captionInput}
+        />
+        <p style={styles.fileHint}>
+          {caption.length}/{MAX_CAPTION_LEN} — aparece na parte de baixo do vídeo
+        </p>
+
         <button
           onClick={handleSubmit}
           disabled={loading || files.length === 0}
@@ -381,6 +404,17 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 12,
     boxSizing: "border-box",
     cursor: "pointer",
+  },
+  // (Fase 5) campo de legenda — mesmo visual do seletor de música
+  captionInput: {
+    width: "100%",
+    padding: "12px",
+    fontSize: 15,
+    color: "#fff",
+    background: "#15151d",
+    border: "1px solid rgba(255,255,255,0.1)",
+    borderRadius: 12,
+    boxSizing: "border-box",
   },
   ownMusicRow: {
     display: "flex",

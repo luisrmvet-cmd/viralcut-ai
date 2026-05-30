@@ -65,7 +65,7 @@ export default function Home() {
   const [files, setFiles] = useState<File[]>([]);
   const [duration, setDuration] = useState<Duration>(30);
   // (Fase 3) música escolhida — default cinematic
-  const [music, setMusic] = useState<string>("cinematic");
+  const [musicKey, setMusicKey] = useState<string>("cinematic");
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string>("");
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -113,7 +113,7 @@ export default function Home() {
       compressed.forEach((file, i) => fd.append(`image${i + 1}`, file));
       fd.append("duration", String(duration));
       // (Fase 3) envia a música escolhida
-      fd.append("music", music);
+      fd.append("musicKey", musicKey);
 
       const res = await fetch("/api/render", { method: "POST", body: fd });
 
@@ -200,8 +200,8 @@ export default function Home() {
         {/* (Fase 3) Seletor de música */}
         <label style={{ ...styles.label, marginTop: 22 }}>Música</label>
         <select
-          value={music}
-          onChange={(e) => setMusic(e.target.value)}
+          value={musicKey}
+          onChange={(e) => setMusicKey(e.target.value)}
           disabled={loading}
           style={styles.musicSelect}
         >

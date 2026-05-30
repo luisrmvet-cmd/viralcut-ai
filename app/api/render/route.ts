@@ -137,6 +137,9 @@ function mixBackgroundMusic(
   musicPath: string,
   outPath: string
 ): Promise<void> {
+  console.log("[mix] videoPath=", videoPath);
+  console.log("[mix] musicPath=", musicPath);
+  console.log("[mix] outPath=", outPath);
   return new Promise((resolve, reject) => {
     ffmpeg()
       .input(videoPath)
@@ -194,9 +197,11 @@ export async function POST(req: NextRequest) {
     await renderVideo(tmpDir, outputPath, files.length, secondsPerImage, duration);
 
     // Fase 3: resolve a música escolhida via allowlist (default = cinematic)
-    const musicKey = String(form.get("music") || DEFAULT_MUSIC);
-    const musicFile = MUSIC_FILES[musicKey] ?? MUSIC_FILES[DEFAULT_MUSIC];
+    const requestedMusic = String(form.get("musicKey") || DEFAULT_MUSIC);
+    const safeMusicKey = MUSIC_FILES[requestedMusic] ? requestedMusic : DEFAULT_MUSIC;
+    const musicFile = MUSIC_FILES[safeMusicKey];
     const musicPath = path.join(MUSIC_DIR, musicFile);
+    console.log("[render] musicKey=", safeMusicKey, "file=", MUSIC_FILES[safeMusicKey]);
 
     // Fase 2B: adiciona música de fundo se existir (senão, vídeo normal)
     let deliverPath = outputPath;

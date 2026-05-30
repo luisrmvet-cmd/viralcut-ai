@@ -71,8 +71,10 @@ export default function Home() {
   // (Fase 4) upload de música própria (opção extra; tem prioridade)
   const [useOwnMusic, setUseOwnMusic] = useState(false);
   const [musicFile, setMusicFile] = useState<File | null>(null);
-  // (Fase 5) NOVO: legenda opcional no vídeo
+  // (Fase 5) legenda opcional no vídeo
   const [caption, setCaption] = useState<string>("");
+  // (Fase 7) NOVO: edição inteligente (cortes na batida + transições pro)
+  const [smartEdit, setSmartEdit] = useState(false);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string>("");
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -146,9 +148,10 @@ export default function Home() {
       } else {
         fd.append("musicKey", musicKey);
       }
-      // (Fase 5) legenda opcional — só envia se preenchida (request idêntico ao
-      // atual quando vazia)
+      // (Fase 5) legenda opcional — só envia se preenchida
       if (caption.trim()) fd.append("caption", caption.trim());
+      // (Fase 7) edição inteligente — só envia quando ligada (default: desligada)
+      if (smartEdit) fd.append("smartEdit", "1");
 
       const res = await fetch("/api/render", { method: "POST", body: fd });
 
@@ -272,7 +275,7 @@ export default function Home() {
           </p>
         )}
 
-        {/* (Fase 5) NOVO: legenda opcional no vídeo */}
+        {/* (Fase 5) legenda opcional no vídeo */}
         <label style={{ ...styles.label, marginTop: 22 }}>
           Legenda no vídeo (opcional)
         </label>
@@ -288,6 +291,17 @@ export default function Home() {
         <p style={styles.fileHint}>
           {caption.length}/{MAX_CAPTION_LEN} — aparece na parte de baixo do vídeo
         </p>
+
+        {/* (Fase 7) NOVO: toggle de edição inteligente */}
+        <label style={styles.ownMusicRow}>
+          <input
+            type="checkbox"
+            checked={smartEdit}
+            onChange={(e) => setSmartEdit(e.target.checked)}
+            disabled={loading}
+          />
+          Edição Inteligente (cortes no ritmo + transições profissionais)
+        </label>
 
         <button
           onClick={handleSubmit}
@@ -405,7 +419,6 @@ const styles: Record<string, React.CSSProperties> = {
     boxSizing: "border-box",
     cursor: "pointer",
   },
-  // (Fase 5) campo de legenda — mesmo visual do seletor de música
   captionInput: {
     width: "100%",
     padding: "12px",

@@ -7,6 +7,17 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import ffmpeg from "fluent-ffmpeg";
 import ffmpegStatic from "ffmpeg-static";
+// (Fase 6) efeitos/transições isolados
+import {
+  FPS,
+  clipChain,
+  motionForIndex,
+  framesPerImage as computeFramesPerImage,
+  xfadeChain,
+  fadeChain,
+} from "../../lib/transitions";
+// (Fase 7) edição inteligente isolada
+import { beatSyncedFrames, SMART_TRANSITIONS, DEFAULT_BPM } from "../../lib/smartEdit";
 
 // FFmpeg exige runtime Node (não Edge) e execução dinâmica.
 export const runtime = "nodejs";
@@ -18,12 +29,9 @@ if (ffmpegStatic) {
 }
 
 const ALLOWED_DURATIONS = [15, 30, 45, 60];
-const FPS = 30;
-const ZOOM = 0.12; // intensidade do zoom (suave)
 
 // === Fase 3: biblioteca de músicas (seleção por categoria) ===
 const MUSIC_DIR = path.join(process.cwd(), "public", "music");
-// Allowlist categoria -> arquivo (NUNCA usar o valor do cliente direto no path)
 const MUSIC_FILES: Record<string, string> = {
   cinematic: "cinematic.mp3",
   motivational: "motivational.mp3",
@@ -35,85 +43,66 @@ const DEFAULT_MUSIC = "cinematic";
 const MUSIC_VOLUME = 0.15; // 15%
 
 // === Fase 5: legenda no vídeo (drawtext) ===
-// Fonte vai no bundle via outputFileTracingIncludes (ver next.config.ts).
-// process.cwd() = raiz do projeto no `next dev` e na função serverless da Vercel.
 const CAPTION_FONT = path.join(process.cwd(), "assets", "fonts", "DejaVuSans-Bold.ttf");
-const CAPTION_MAX_LEN = 120; // frase curta
-const CAPTION_WRAP = 22; // ~caracteres por linha (evita estourar a largura 1080)
+const CAPTION_MAX_LEN = 120;
+const CAPTION_WRAP = 22;
 
 /**
- * Monta os parâmetros do zoompan para cada efeito, alternando por imagem:
- *  - 0: zoom in leve     - 1: zoom out leve     - 2: pan/zoom lateral suave
- * `d1` = (frames - 1), usado para normalizar a animação de 0 a 1.
- * Importante: as expressões NÃO usam vírgula (a vírgula separa filtros na
- * filtergraph), por isso usamos progressão linear com `on` em vez de min()/max().
- */
-function zoompanForEffect(effect: number, d1: number): string {
-  const centerX = "x='iw/2-(iw/zoom/2)'";
-  const centerY = "y='ih/2-(ih/zoom/2)'";
-  switch (effect) {
-    case 0: // zoom in
-      return `z='1+${ZOOM}*on/${d1}':${centerX}:${centerY}`;
-    case 1: // zoom out
-      return `z='${1 + ZOOM}-${ZOOM}*on/${d1}':${centerX}:${centerY}`;
-    default: // 2: pan lateral (zoom fixo, desloca na horizontal)
-      return `z='${1 + ZOOM}':x='(iw-iw/zoom)*on/${d1}':${centerY}`;
-  }
-}
-
-/**
- * Distribui `total` frames entre `n` imagens de forma que a SOMA seja
- * exatamente `total` (sem erro de arredondamento na duração final).
- */
-function distributeFrames(total: number, n: number): number[] {
-  const base = Math.floor(total / n);
-  let rem = total - base * n;
-  return Array.from({ length: n }, () => {
-    const extra = rem > 0 ? 1 : 0;
-    if (rem > 0) rem--;
-    return base + extra;
-  });
-}
-
-/**
- * Gera o vídeo vertical 1080x1920 com efeito Ken Burns por imagem.
- * Cada imagem vira um clipe (filter_complex) e todos são unidos com concat.
+ * Gera o vídeo vertical 1080x1920 com efeito Ken Burns/zoom/pan por imagem.
+ *
+ * (Fase 6) corte seco virou crossfade (xfade) + fade in/out.
+ * (Fase 7) modo `smartEdit`: cortes sincronizados a uma grade de batidas
+ *   aproximada (BPM assumido) + paleta de transições profissionais.
+ *   Quando `smartEdit` é false (padrão), o comportamento é EXATAMENTE o da
+ *   Fase 6. O modo inteligente mantém a MESMA soma de frames, então a duração
+ *   final é idêntica à do modo normal (15/30/45/60s preservados).
  */
 function renderVideo(
   dir: string,
   outputPath: string,
   count: number,
-  secondsPerImage: number,
-  totalSeconds: number
+  _secondsPerImage: number,
+  totalSeconds: number,
+  smartEdit = false
 ): Promise<void> {
-  const totalFrames = Math.round(totalSeconds * FPS);
-  const framesPerImage = distributeFrames(totalFrames, count);
+  // (Fase 7) distribuição de frames: inteligente (na batida) ou normal
+  const frames = smartEdit
+    ? beatSyncedFrames(totalSeconds, count, DEFAULT_BPM, FPS)
+    : computeFramesPerImage(totalSeconds, count, FPS);
+
+  // (Fase 7) transições: paleta pro no modo inteligente; "fade" no normal
+  const transitions = smartEdit ? SMART_TRANSITIONS : ["fade"];
 
   const command = ffmpeg();
   for (let i = 0; i < count; i++) {
-    command.input(path.join(dir, `${i + 1}.png`)); // cada imagem = 1 frame de entrada
+    command.input(path.join(dir, `${i + 1}.png`));
   }
 
-  // Monta a filtergraph: uma cadeia por imagem + concat final.
   const chains: string[] = [];
+
+  // 1) cadeia de cada imagem (Ken Burns / zoom / pan) -> [v0..v{count-1}]
+  const clipLabels: string[] = [];
   for (let i = 0; i < count; i++) {
-    const d = framesPerImage[i];
-    const d1 = Math.max(d - 1, 1); // evita divisão por zero
-    const zp = zoompanForEffect(i % 3, d1);
-    chains.push(
-      `[${i}:v]` +
-        // encaixa em 1080x1920 sem distorcer + fundo preto
-        `scale=1080:1920:force_original_aspect_ratio=decrease,` +
-        `pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,setsar=1,` +
-        // upscale 2x antes do zoompan reduz tremor
-        `scale=2160:3840,` +
-        `zoompan=${zp}:d=${d}:s=1080x1920:fps=${FPS},` +
-        `format=yuv420p[v${i}]`
-    );
+    const label = `v${i}`;
+    clipLabels.push(label);
+    chains.push(clipChain(i, label, motionForIndex(i), frames[i]));
   }
-  const concatInputs = Array.from({ length: count }, (_, i) => `[v${i}]`).join("");
-  const filterGraph =
-    chains.join(";") + `;${concatInputs}concat=n=${count}:v=1:a=0[outv]`;
+
+  // 2) transições entre clipes (xfade encadeado)
+  const { chains: xchains, lastLabel } = xfadeChain(
+    clipLabels,
+    frames,
+    totalSeconds,
+    count,
+    FPS,
+    transitions
+  );
+  chains.push(...xchains);
+
+  // 3) fade in / fade out na saída final -> [outv]
+  chains.push(fadeChain(lastLabel, totalSeconds, "outv"));
+
+  const filterGraph = chains.join(";");
 
   return new Promise((resolve, reject) => {
     command
@@ -133,20 +122,7 @@ function renderVideo(
   });
 }
 
-/**
- * Fase 5 — passo ISOLADO de legenda, executado APÓS o render visual e ANTES da
- * música. Grava a frase no vídeo via drawtext. Re-encoda o vídeo (drawtext
- * altera pixels — não dá `-c:v copy` aqui). NÃO toca em renderVideo nem em
- * mixBackgroundMusic.
- *
- * Decisões à prova de bug (validadas em render real):
- *  - `textfile=`: a frase vai num arquivo, então `:` `'` e acentos no TEXTO
- *    não precisam de escape no filtergraph.
- *  - `expansion=none`: trata `%` e `%{...}` como texto literal (senão o `%`
- *    quebra o filtro).
- *  - wrapCaption: quebra em linhas de ~22 chars para não estourar a largura.
- *  - escapamos apenas os CAMINHOS (`:` -> `\:`) do fontfile/textfile.
- */
+// === Fase 5: legenda (drawtext), passo isolado ===
 function sanitizeCaption(raw: string): string {
   return (raw || "")
     .replace(/[\r\n\t]+/g, " ")
@@ -207,12 +183,7 @@ async function drawCaption(
   });
 }
 
-/**
- * Fase 2B — passo ISOLADO de áudio, executado APÓS o render visual.
- * Faz loop da música, aplica volume 15% e copia o vídeo SEM re-renderizar
- * (rápido, não re-processa os frames). `-shortest` corta no fim do vídeo,
- * então a música toca o vídeo inteiro e repete se for mais curta.
- */
+// === Fase 2B: música de fundo, passo isolado (copia o vídeo, não re-renderiza) ===
 function mixBackgroundMusic(
   videoPath: string,
   musicPath: string,
@@ -225,12 +196,12 @@ function mixBackgroundMusic(
     ffmpeg()
       .input(videoPath)
       .input(musicPath)
-      .inputOptions(["-stream_loop", "-1"]) // loop infinito da música
+      .inputOptions(["-stream_loop", "-1"])
       .complexFilter(`[1:a]volume=${MUSIC_VOLUME}[a]`)
       .outputOptions([
         "-map", "0:v",
         "-map", "[a]",
-        "-c:v", "copy", // NÃO re-renderiza o vídeo
+        "-c:v", "copy",
         "-c:a", "aac",
         "-shortest",
       ])
@@ -249,7 +220,6 @@ export async function POST(req: NextRequest) {
 
     const files: File[] = [];
     for (const [key, value] of form.entries()) {
-      // só entradas image* são fotos; "musicFile" (Fase 4) NÃO entra aqui
       if (key.startsWith("image") && value instanceof File && value.size > 0) {
         files.push(value);
       }
@@ -261,14 +231,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // duração: aceita SOMENTE 15/30/45/60; senão 30
     let duration = Number(form.get("duration") || 30);
     if (!ALLOWED_DURATIONS.includes(duration)) duration = 30;
     const secondsPerImage = duration / files.length;
 
+    // (Fase 7) flag de edição inteligente (default OFF -> fallback Fase 6)
+    const smartEdit = String(form.get("smartEdit") || "") === "1";
+
     console.log(
       `[render] jobId=${jobId} | duration=${duration}s | imagens=${files.length} | ` +
-        `segPorImagem=${secondsPerImage}`
+        `segPorImagem=${secondsPerImage} | smartEdit=${smartEdit}`
     );
 
     await mkdir(tmpDir, { recursive: true });
@@ -278,11 +250,9 @@ export async function POST(req: NextRequest) {
     }
 
     const outputPath = path.join(tmpDir, "video.mp4");
-    await renderVideo(tmpDir, outputPath, files.length, secondsPerImage, duration);
+    await renderVideo(tmpDir, outputPath, files.length, secondsPerImage, duration, smartEdit);
 
-    // === Fase 5: legenda opcional — etapa ISOLADA, entre o render e a música ===
-    // Sem frase (ou sem fonte no bundle) => videoForMusic = outputPath, ou seja,
-    // o fluxo fica IDÊNTICO ao já validado. Falha na legenda não quebra o vídeo.
+    // === Fase 5: legenda opcional ===
     const caption = sanitizeCaption(String(form.get("caption") || ""));
     let videoForMusic = outputPath;
     if (caption && existsSync(CAPTION_FONT)) {
@@ -297,7 +267,7 @@ export async function POST(req: NextRequest) {
       console.warn("[render] legenda solicitada mas fonte não encontrada em", CAPTION_FONT);
     }
 
-    // Fase 4: música própria enviada tem PRIORIDADE; biblioteca é o fallback
+    // === Fase 4/3: música própria (prioridade) ou biblioteca ===
     const uploadedMusic = form.get("musicFile");
     let musicPath: string;
     if (uploadedMusic instanceof File && uploadedMusic.size > 0) {
@@ -306,16 +276,13 @@ export async function POST(req: NextRequest) {
       musicPath = customPath;
       console.log("[render] música enviada pelo usuário:", uploadedMusic.size, "bytes");
     } else {
-      // Fase 3: biblioteca via allowlist (default = cinematic)
       const requestedMusic = String(form.get("musicKey") || DEFAULT_MUSIC);
       const safeMusicKey = MUSIC_FILES[requestedMusic] ? requestedMusic : DEFAULT_MUSIC;
       musicPath = path.join(MUSIC_DIR, MUSIC_FILES[safeMusicKey]);
       console.log("[render] musicKey=", safeMusicKey, "file=", MUSIC_FILES[safeMusicKey]);
     }
 
-    // Fase 2B: adiciona música de fundo se existir (senão, vídeo normal)
-    // (Fase 5) a música agora consome `videoForMusic` — o vídeo COM legenda,
-    // se houver; senão é o próprio outputPath. mixBackgroundMusic NÃO muda.
+    // === Fase 2B: adiciona música se existir ===
     let deliverPath = videoForMusic;
     if (existsSync(musicPath)) {
       const withMusicPath = path.join(tmpDir, "video-music.mp4");
@@ -323,7 +290,6 @@ export async function POST(req: NextRequest) {
         await mixBackgroundMusic(videoForMusic, musicPath, withMusicPath);
         if (existsSync(withMusicPath)) deliverPath = withMusicPath;
       } catch (e) {
-        // se a mixagem falhar, entrega o vídeo SEM música
         console.error("[render] falha ao adicionar música; vídeo sem áudio:", e);
       }
     }

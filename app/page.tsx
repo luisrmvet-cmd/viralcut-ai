@@ -21,6 +21,7 @@ const MUSIC_OPTIONS = [
 const MAX_DIMENSION = 1920;
 const JPEG_QUALITY = 0.8;
 const MAX_TOTAL_BYTES = 4 * 1024 * 1024;
+const MAX_MUSIC_BYTES = 3 * 1024 * 1024; // (Fase 4) limite por MP3 enviado (evita 413 da Vercel)
 
 function loadImage(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -66,6 +67,9 @@ export default function Home() {
   const [duration, setDuration] = useState<Duration>(30);
   // (Fase 3) música escolhida — default cinematic
   const [musicKey, setMusicKey] = useState<string>("cinematic");
+  // (Fase 4) upload de música própria (opção extra; tem prioridade)
+  const [useOwnMusic, setUseOwnMusic] = useState(false);
+  const [musicFile, setMusicFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string>("");
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -79,6 +83,27 @@ export default function Home() {
     setVideoUrl(null);
     setError(null);
     setStatus("");
+  }
+
+  function onPickMusic(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0] ?? null;
+    setError(null);
+    if (!f) {
+      setMusicFile(null);
+      return;
+    }
+    const isMp3 = f.type === "audio/mpeg" || f.name.toLowerCase().endsWith(".mp3");
+    if (!isMp3) {
+      setError("Selecione um arquivo .mp3.");
+      setMusicFile(null);
+      return;
+    }
+    if (f.size > MAX_MUSIC_BYTES) {
+      setError("A música excede 3 MB. Escolha um arquivo menor.");
+      setMusicFile(null);
+      return;
+    }
+    setMusicFile(f);
   }
 
   async function handleSubmit() {
@@ -112,8 +137,12 @@ export default function Home() {
       const fd = new FormData();
       compressed.forEach((file, i) => fd.append(`image${i + 1}`, file));
       fd.append("duration", String(duration));
-      // (Fase 3) envia a música escolhida
-      fd.append("musicKey", musicKey);
+      // (Fase 4) upload próprio tem PRIORIDADE; senão usa a biblioteca
+      if (useOwnMusic && musicFile) {
+        fd.append("musicFile", musicFile);
+      } else {
+        fd.append("musicKey", musicKey);
+      }
 
       const res = await fetch("/api/render", { method: "POST", body: fd });
 
@@ -211,6 +240,31 @@ export default function Home() {
             </option>
           ))}
         </select>
+
+        {/* (Fase 4) opção extra: usar minha própria música */}
+        <label style={styles.ownMusicRow}>
+          <input
+            type="checkbox"
+            checked={useOwnMusic}
+            onChange={(e) => setUseOwnMusic(e.target.checked)}
+            disabled={loading}
+          />
+          Usar minha própria música (.mp3, até 3 MB)
+        </label>
+        {useOwnMusic && (
+          <input
+            type="file"
+            accept="audio/mpeg,.mp3"
+            onChange={onPickMusic}
+            disabled={loading}
+            style={{ ...styles.fileInput, marginTop: 10 }}
+          />
+        )}
+        {useOwnMusic && musicFile && (
+          <p style={styles.fileHint}>
+            {musicFile.name} ({(musicFile.size / (1024 * 1024)).toFixed(1)} MB)
+          </p>
+        )}
 
         <button
           onClick={handleSubmit}
@@ -326,6 +380,15 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid rgba(255,255,255,0.1)",
     borderRadius: 12,
     boxSizing: "border-box",
+    cursor: "pointer",
+  },
+  ownMusicRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 14,
+    fontSize: 13,
+    color: "#b9b9c4",
     cursor: "pointer",
   },
   cta: {

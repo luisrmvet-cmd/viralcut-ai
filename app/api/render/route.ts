@@ -21,8 +21,17 @@ const ALLOWED_DURATIONS = [15, 30, 45, 60];
 const FPS = 30;
 const ZOOM = 0.12; // intensidade do zoom (suave)
 
-// === Fase 2B: música de fundo (passo isolado, após o render) ===
-const MUSIC_PATH = path.join(process.cwd(), "public", "music", "background.mp3");
+// === Fase 3: biblioteca de músicas (seleção por categoria) ===
+const MUSIC_DIR = path.join(process.cwd(), "public", "music");
+// Allowlist categoria -> arquivo (NUNCA usar o valor do cliente direto no path)
+const MUSIC_FILES: Record<string, string> = {
+  cinematic: "cinematic.mp3",
+  motivational: "motivational.mp3",
+  happy: "happy.mp3",
+  emotional: "emotional.mp3",
+  viral: "viral.mp3",
+};
+const DEFAULT_MUSIC = "cinematic";
 const MUSIC_VOLUME = 0.15; // 15%
 
 /**
@@ -128,6 +137,9 @@ function mixBackgroundMusic(
   musicPath: string,
   outPath: string
 ): Promise<void> {
+  console.log("[mix] videoPath=", videoPath);
+  console.log("[mix] musicPath=", musicPath);
+  console.log("[mix] outPath=", outPath);
   return new Promise((resolve, reject) => {
     ffmpeg()
       .input(videoPath)
@@ -184,12 +196,19 @@ export async function POST(req: NextRequest) {
     const outputPath = path.join(tmpDir, "video.mp4");
     await renderVideo(tmpDir, outputPath, files.length, secondsPerImage, duration);
 
+    // Fase 3: resolve a música escolhida via allowlist (default = cinematic)
+    const requestedMusic = String(form.get("musicKey") || DEFAULT_MUSIC);
+    const safeMusicKey = MUSIC_FILES[requestedMusic] ? requestedMusic : DEFAULT_MUSIC;
+    const musicFile = MUSIC_FILES[safeMusicKey];
+    const musicPath = path.join(MUSIC_DIR, musicFile);
+    console.log("[render] musicKey=", safeMusicKey, "file=", MUSIC_FILES[safeMusicKey]);
+
     // Fase 2B: adiciona música de fundo se existir (senão, vídeo normal)
     let deliverPath = outputPath;
-    if (existsSync(MUSIC_PATH)) {
+    if (existsSync(musicPath)) {
       const withMusicPath = path.join(tmpDir, "video-music.mp4");
       try {
-        await mixBackgroundMusic(outputPath, MUSIC_PATH, withMusicPath);
+        await mixBackgroundMusic(outputPath, musicPath, withMusicPath);
         if (existsSync(withMusicPath)) deliverPath = withMusicPath;
       } catch (e) {
         // se a mixagem falhar, entrega o vídeo SEM música

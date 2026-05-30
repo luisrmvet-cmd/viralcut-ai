@@ -9,6 +9,15 @@ import VideoHistory from "./components/VideoHistory";
 const DURATIONS = [15, 30, 45, 60] as const;
 type Duration = (typeof DURATIONS)[number];
 
+// (Fase 3) Biblioteca de músicas — chave (enviada à API) + rótulo (exibido)
+const MUSIC_OPTIONS = [
+  { key: "cinematic", label: "Cinemática" },
+  { key: "motivational", label: "Motivacional" },
+  { key: "happy", label: "Alegre" },
+  { key: "emotional", label: "Emocional" },
+  { key: "viral", label: "Viral" },
+] as const;
+
 const MAX_DIMENSION = 1920;
 const JPEG_QUALITY = 0.8;
 const MAX_TOTAL_BYTES = 4 * 1024 * 1024;
@@ -55,6 +64,8 @@ async function compressImage(file: File): Promise<File> {
 export default function Home() {
   const [files, setFiles] = useState<File[]>([]);
   const [duration, setDuration] = useState<Duration>(30);
+  // (Fase 3) música escolhida — default cinematic
+  const [musicKey, setMusicKey] = useState<string>("cinematic");
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string>("");
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -101,6 +112,8 @@ export default function Home() {
       const fd = new FormData();
       compressed.forEach((file, i) => fd.append(`image${i + 1}`, file));
       fd.append("duration", String(duration));
+      // (Fase 3) envia a música escolhida
+      fd.append("musicKey", musicKey);
 
       const res = await fetch("/api/render", { method: "POST", body: fd });
 
@@ -183,6 +196,21 @@ export default function Home() {
             );
           })}
         </div>
+
+        {/* (Fase 3) Seletor de música */}
+        <label style={{ ...styles.label, marginTop: 22 }}>Música</label>
+        <select
+          value={musicKey}
+          onChange={(e) => setMusicKey(e.target.value)}
+          disabled={loading}
+          style={styles.musicSelect}
+        >
+          {MUSIC_OPTIONS.map((m) => (
+            <option key={m.key} value={m.key}>
+              {m.label}
+            </option>
+          ))}
+        </select>
 
         <button
           onClick={handleSubmit}
@@ -287,6 +315,18 @@ const styles: Record<string, React.CSSProperties> = {
     borderColor: "#3b82f6",
     boxShadow: "0 6px 18px rgba(37, 99, 235, 0.45)",
     transform: "translateY(-1px)",
+  },
+  musicSelect: {
+    width: "100%",
+    padding: "12px",
+    fontSize: 15,
+    fontWeight: 600,
+    color: "#fff",
+    background: "#15151d",
+    border: "1px solid rgba(255,255,255,0.1)",
+    borderRadius: 12,
+    boxSizing: "border-box",
+    cursor: "pointer",
   },
   cta: {
     width: "100%",

@@ -167,8 +167,11 @@ export async function POST(req: NextRequest) {
     const form = await req.formData();
 
     const files: File[] = [];
-    for (const value of form.values()) {
-      if (value instanceof File && value.size > 0) files.push(value);
+    for (const [key, value] of form.entries()) {
+      // só entradas image* são fotos; "musicFile" (Fase 4) NÃO entra aqui
+      if (key.startsWith("image") && value instanceof File && value.size > 0) {
+        files.push(value);
+      }
     }
     if (files.length === 0) {
       return NextResponse.json(
@@ -196,12 +199,21 @@ export async function POST(req: NextRequest) {
     const outputPath = path.join(tmpDir, "video.mp4");
     await renderVideo(tmpDir, outputPath, files.length, secondsPerImage, duration);
 
-    // Fase 3: resolve a música escolhida via allowlist (default = cinematic)
-    const requestedMusic = String(form.get("musicKey") || DEFAULT_MUSIC);
-    const safeMusicKey = MUSIC_FILES[requestedMusic] ? requestedMusic : DEFAULT_MUSIC;
-    const musicFile = MUSIC_FILES[safeMusicKey];
-    const musicPath = path.join(MUSIC_DIR, musicFile);
-    console.log("[render] musicKey=", safeMusicKey, "file=", MUSIC_FILES[safeMusicKey]);
+    // Fase 4: música própria enviada tem PRIORIDADE; biblioteca é o fallback
+    const uploadedMusic = form.get("musicFile");
+    let musicPath: string;
+    if (uploadedMusic instanceof File && uploadedMusic.size > 0) {
+      const customPath = path.join(tmpDir, "custom-music.mp3");
+      await writeFile(customPath, Buffer.from(await uploadedMusic.arrayBuffer()));
+      musicPath = customPath;
+      console.log("[render] música enviada pelo usuário:", uploadedMusic.size, "bytes");
+    } else {
+      // Fase 3: biblioteca via allowlist (default = cinematic)
+      const requestedMusic = String(form.get("musicKey") || DEFAULT_MUSIC);
+      const safeMusicKey = MUSIC_FILES[requestedMusic] ? requestedMusic : DEFAULT_MUSIC;
+      musicPath = path.join(MUSIC_DIR, MUSIC_FILES[safeMusicKey]);
+      console.log("[render] musicKey=", safeMusicKey, "file=", MUSIC_FILES[safeMusicKey]);
+    }
 
     // Fase 2B: adiciona música de fundo se existir (senão, vídeo normal)
     let deliverPath = outputPath;

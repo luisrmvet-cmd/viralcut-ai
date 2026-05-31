@@ -282,18 +282,19 @@ export default function Home() {
         throw new Error(message);
       }
 
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      setVideoUrl(url);
+      const data = await res.json();
+      if (!data?.url) throw new Error("Resposta sem URL do vídeo.");
+      setVideoUrl(data.url);
 
       try {
-        await addVideo(blob, duration);
+        const histBlob = await fetch(data.url).then((r) => r.blob());
+        await addVideo(histBlob, duration);
         setHistoryKey((k) => k + 1);
       } catch {
         /* falha ao salvar histórico não impede o uso do vídeo atual */
       }
 
-      window.open(url, "_blank");
+      window.open(data.url, "_blank");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao enviar a mídia.");
     } finally {

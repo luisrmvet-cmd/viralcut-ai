@@ -8,7 +8,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import ffmpeg from "fluent-ffmpeg";
 import ffmpegStatic from "ffmpeg-static";
-import { del } from "@vercel/blob";
+import { del, put } from "@vercel/blob";
 // (Fase 6) Ken Burns/zoom/pan por imagem
 import { FPS, clipChain, motionForIndex } from "../../lib/transitions";
 // (Fase 7) BPM da edição inteligente (cortes no ritmo)
@@ -464,16 +464,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // sobe o MP4 final ao Vercel Blob e devolve a URL (evita "Load failed" no
+    // iOS por segurar conexão longa + baixar binário grande inline).
     const videoBuffer = await readFile(deliverPath);
-    return new NextResponse(new Uint8Array(videoBuffer), {
-      status: 200,
-      headers: {
-        "Content-Type": "video/mp4",
-        "Content-Length": String(videoBuffer.length),
-        "Content-Disposition": `attachment; filename="viralcut-${jobId}.mp4"`,
-        "Cache-Control": "no-store",
-      },
+    const uploaded = await put(`renders/viralcut-${jobId}.mp4`, videoBuffer, {
+      access: "public",
+      contentType: "video/mp4",
     });
+    return NextResponse.json({ ok: true, url: uploaded.url });
   } catch (err) {
     console.error("[render] ERRO:", err);
     return NextResponse.json(

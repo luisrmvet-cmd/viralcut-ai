@@ -170,28 +170,7 @@ export default function Home() {
     setMusicFile(f);
   }
 
-  function onPickMusic(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0] ?? null;
-    setError(null);
-    if (!f) {
-      setMusicFile(null);
-      return;
-    }
-    const isMp3 = f.type === "audio/mpeg" || f.name.toLowerCase().endsWith(".mp3");
-    if (!isMp3) {
-      setError("Selecione um arquivo .mp3.");
-      setMusicFile(null);
-      return;
-    }
-    if (f.size > MAX_MUSIC_BYTES) {
-      setError("A música excede 3 MB. Escolha um arquivo menor.");
-      setMusicFile(null);
-      return;
-    }
-    setMusicFile(f);
-  }
-
-  async function handleSubmit() {
+    async function handleSubmit() {
     setError(null);
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     setVideoUrl(null);

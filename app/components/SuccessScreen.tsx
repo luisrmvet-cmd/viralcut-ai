@@ -9,8 +9,8 @@ type Props = {
 };
 
 // (Fase 8B.1) Detecta iOS — iPhone/iPod e também iPadOS 13+, que se reporta
-// como "MacIntel" mas tem touch. No iOS, o download programático é ignorado
-// pelo WebKit e o vídeo abre no player; orientamos o usuário a salvar.
+// como "MacIntel" mas tem touch. No iOS o download forçado é ignorado pelo
+// WebKit, então usamos o compartilhamento nativo (Salvar Vídeo / Arquivos).
 function detectIOS(): boolean {
   if (typeof navigator === "undefined") return false;
   const ua = navigator.userAgent || "";
@@ -21,27 +21,22 @@ function detectIOS(): boolean {
 }
 
 export default function SuccessScreen({ videoUrl, onReset }: Props) {
-  const [downloading, setDownloading] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
+  const [iosMsg, setIosMsg] = useState<string | null>(null);
 
   // calculado no cliente para evitar divergência de hidratação
   useEffect(() => {
     setIsIOS(detectIOS());
   }, []);
 
+  // DESKTOP/ANDROID: baixa o MP4 de verdade (inalterado).
   async function handleDownload() {
-    // No iOS o download forçado não funciona: abrimos o vídeo para o usuário
-    // salvar pelo menu de compartilhamento (ver instrução abaixo do botão).
-    if (isIOS) {
-      window.open(videoUrl, "_blank");
-      return;
-    }
-
-    setDownloading(true);
+    setBusy(true);
     try {
       // videoUrl é uma URL REMOTA (Vercel Blob). O atributo `download` é
       // ignorado em links cross-origin, então buscamos os bytes e criamos
-      // um blob same-origin para forçar o download (desktop/Android).
+      // um blob same-origin para forçar o download.
       const res = await fetch(videoUrl);
       if (!res.ok) throw new Error("fetch-failed");
       const blob = await res.blob();
@@ -52,20 +47,65 @@ export default function SuccessScreen({ videoUrl, onReset }: Props) {
       document.body.appendChild(a);
       a.click();
       a.remove();
-      // folga antes de revogar para não cancelar um download em andamento
       setTimeout(() => URL.revokeObjectURL(objectUrl), 4000);
     } catch {
-      // Fallback: abre o vídeo numa nova aba para o usuário salvar manualmente.
       window.open(videoUrl, "_blank");
     } finally {
-      setDownloading(false);
+      setBusy(false);
     }
   }
 
-  const downloadLabel = isIOS
-    ? "Abrir vídeo para salvar"
-    : downloading
-    ? "Preparando download..."
+  // iPHONE/iPAD: melhor caminho é a folha de compartilhamento nativa com o
+  // arquivo (oferece "Salvar Vídeo" e "Salvar em Arquivos"). Se não houver
+  // suporte, copia o link e mostra a instrução + link manual abaixo.
+  async function handleIOSSave() {
+    setIosMsg(null);
+    setBusy(true);
+    try {
+      const res = await fetch(videoUrl);
+      if (!res.ok) throw new Error("fetch-failed");
+      const blob = await res.blob();
+      const file = new File([blob], `viralcut-${Date.now()}.mp4`, {
+        type: blob.type || "video/mp4",
+      });
+
+      const nav = navigator as Navigator & {
+        canShare?: (data?: { files?: File[] }) => boolean;
+      };
+
+      if (nav.canShare && nav.canShare({ files: [file] })) {
+        try {
+          await nav.share({ files: [file], title: "ViralCut AI" });
+          return; // compartilhamento concluído
+        } catch (err) {
+          // usuário cancelou a folha → não faz nada
+          if ((err as Error)?.name === "AbortError") return;
+          // qualquer outra falha → cai para o fallback de copiar link
+        }
+      }
+    } catch {
+      // fetch falhou → cai para o fallback de copiar link
+    } finally {
+      setBusy(false);
+    }
+
+    // Fallback (sem suporte a compartilhar arquivo): copia o link.
+    try {
+      await navigator.clipboard.writeText(videoUrl);
+      setIosMsg(
+        "Link copiado. Abra no Safari e toque em compartilhar para salvar."
+      );
+    } catch {
+      setIosMsg(
+        "Toque em \u201CAbrir v\u00EDdeo em nova aba\u201D e use o compartilhar do Safari para salvar."
+      );
+    }
+  }
+
+  const primaryLabel = busy
+    ? "Preparando..."
+    : isIOS
+    ? "Salvar vídeo"
     : "⬇  Baixar Vídeo";
 
   return (
@@ -73,28 +113,40 @@ export default function SuccessScreen({ videoUrl, onReset }: Props) {
       <div style={styles.badge}>✓</div>
       <h2 style={styles.title}>Seu Reel está pronto!</h2>
       <p style={styles.subtitle}>
-        Vídeo gerado com sucesso. Assista abaixo e baixe em alta qualidade.
+        Vídeo gerado com sucesso. Assista abaixo e salve em alta qualidade.
       </p>
 
       <video src={videoUrl} controls playsInline style={styles.video} />
 
       <button
         type="button"
-        onClick={handleDownload}
-        disabled={downloading}
+        onClick={isIOS ? handleIOSSave : handleDownload}
+        disabled={busy}
         style={{
-          ...styles.downloadBtn,
-          ...(downloading ? styles.downloadBtnDisabled : {}),
+          ...styles.primaryBtn,
+          ...(busy ? styles.primaryBtnDisabled : {}),
         }}
       >
-        {downloadLabel}
+        {primaryLabel}
       </button>
 
       {isIOS && (
-        <p style={styles.iosHint}>
-          No iPhone, toque em compartilhar e escolha Salvar em Arquivos ou
-          Salvar Vídeo.
-        </p>
+        <>
+          {iosMsg && <p style={styles.iosMsg}>{iosMsg}</p>}
+          <a
+            href={videoUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={styles.iosLink}
+          >
+            Abrir vídeo em nova aba
+          </a>
+          <p style={styles.iosHint}>
+            No iPhone, toque em <strong>Salvar vídeo</strong> e escolha “Salvar
+            Vídeo” ou “Salvar em Arquivos”. Se a opção não aparecer, use o link
+            acima e toque em compartilhar.
+          </p>
+        </>
       )}
 
       <button type="button" onClick={onReset} style={styles.againBtn}>
@@ -151,7 +203,7 @@ const styles: Record<string, React.CSSProperties> = {
     background: "#000",
     border: "1px solid rgba(255,255,255,0.08)",
   },
-  downloadBtn: {
+  primaryBtn: {
     width: "100%",
     marginTop: 20,
     padding: "15px 0",
@@ -165,13 +217,28 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: "0 10px 28px rgba(37, 99, 235, 0.4)",
     transition: "opacity 0.18s ease",
   },
-  downloadBtnDisabled: {
+  primaryBtnDisabled: {
     opacity: 0.55,
     cursor: "not-allowed",
     boxShadow: "none",
   },
-  iosHint: {
+  iosMsg: {
     margin: "12px 4px 0",
+    fontSize: 13,
+    lineHeight: 1.45,
+    color: "#86efac",
+    maxWidth: 320,
+  },
+  iosLink: {
+    display: "inline-block",
+    marginTop: 12,
+    fontSize: 14,
+    fontWeight: 700,
+    color: "#93c5fd",
+    textDecoration: "underline",
+  },
+  iosHint: {
+    margin: "10px 4px 0",
     fontSize: 13,
     lineHeight: 1.45,
     color: "#9aa0ae",
@@ -179,7 +246,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   againBtn: {
     width: "100%",
-    marginTop: 12,
+    marginTop: 16,
     padding: "14px 0",
     fontSize: 15,
     fontWeight: 700,

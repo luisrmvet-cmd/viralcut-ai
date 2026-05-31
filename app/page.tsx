@@ -127,8 +127,18 @@ export default function Home() {
 
   async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const picked = Array.from(e.target.files ?? []);
-    const imgs = picked.filter((f) => f.type.startsWith("image/"));
-    const vids = picked.filter((f) => f.type.startsWith("video/"));
+    const isVideo = (f: File) => {
+const name = f.name.toLowerCase();
+return (
+f.type.startsWith("video/") ||
+name.endsWith(".mov") ||
+name.endsWith(".mp4") ||
+name.endsWith(".webm")
+);
+};
+
+const vids = picked.filter((f) => isVideo(f));
+const imgs = picked.filter((f) => !isVideo(f));
 
     setFiles(imgs);
     if (videoUrl) URL.revokeObjectURL(videoUrl);

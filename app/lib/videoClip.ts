@@ -1,25 +1,32 @@
-// app/lib/videoClip.ts — Fase 8A.2 (+ fix vídeo de iPhone/HEVC/HDR/MOV)
+// app/lib/videoClip.ts — Fase 8A.2 (+ fix iPhone/HEVC/HDR + uniformização p/ xfade)
 import { FPS } from "./transitions";
 
 // VFs do passo SEPARADO de normalização (rodado ANTES do render misto):
-// SDR/comum -> encaixa em 1080x1920 e força yuv420p.
 export const NORMALIZE_VF_SDR =
   "scale=1080:1920:force_original_aspect_ratio=decrease," +
   "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,setsar=1,format=yuv420p";
 
-// HDR (HLG/PQ — ex.: iPhone "HDR Video") -> tonemap para bt709 antes de encaixar.
-// Usa zscale+tonemap (presentes em builds completos do ffmpeg-static). Se não
-// houver, o backend cai automaticamente no NORMALIZE_VF_SDR.
 export const NORMALIZE_VF_HDR =
   "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709," +
   "tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p," +
   "scale=1080:1920:force_original_aspect_ratio=decrease," +
   "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,setsar=1";
 
-// Cadeia de UM clipe de vídeo (já normalizado) para o slot de `frames` quadros.
-// Como o clipe normalizado já é 1080x1920/yuv420p/30fps, scale/pad aqui são
-// idempotentes (segurança p/ o xfade). tpad clona o último quadro se a fonte
-// for mais curta que o slot; trim corta no exato.
+/**
+ * (Fix) Prep aplicado a TODO clipe (imagem OU vídeo) imediatamente antes do
+ * xfade, garantindo que ambos os streams sejam IDÊNTICOS: mesmo SAR, fps,
+ * pixel format e MESMO timebase (settb=AVTB) + PTS zerado. O xfade aborta
+ * (ffmpeg code 234) quando os dois lados divergem em timebase/fps — o que
+ * acontecia ao fundir o clipe de imagem (zoompan) com o de vídeo (tpad/trim).
+ */
+export const XFADE_PREP =
+  `setsar=1,fps=${FPS},format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS`;
+
+/**
+ * Cadeia de UM clipe de vídeo (já normalizado) para o slot de `frames` quadros.
+ * tpad clona o último quadro se a fonte for mais curta que o slot; trim corta.
+ * A uniformização final fica a cargo do XFADE_PREP (aplicado em renderVideo).
+ */
 export function videoClipChain(inputIndex: number, label: string, frames: number): string {
   return `[${inputIndex}:v]scale=1080:1920:force_original_aspect_ratio=decrease,` +
     `pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=${FPS},` +

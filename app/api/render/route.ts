@@ -26,6 +26,7 @@ import {
   isAllowedBlobUrl,
   NORMALIZE_VF_SDR,
   NORMALIZE_VF_HDR,
+  XFADE_PREP,
 } from "../../lib/videoClip";
 
 export const runtime = "nodejs";
@@ -84,6 +85,7 @@ function probeIsHDR(srcPath: string): Promise<boolean> {
 function normalizeVideo(src: string, out: string, hdr: boolean): Promise<void> {
   const vf = hdr ? NORMALIZE_VF_HDR : NORMALIZE_VF_SDR;
   return new Promise((resolve, reject) => {
+    let startedCmd = "";
     ffmpeg(src)
       .outputOptions([
         "-map", "0:v:0",
@@ -99,8 +101,16 @@ function normalizeVideo(src: string, out: string, hdr: boolean): Promise<void> {
         "-colorspace", "bt709",
         "-movflags", "+faststart",
       ])
-      .on("start", (cmd) => console.log("[normalize] ffmpeg:", cmd))
-      .on("error", (err) => reject(err))
+      .on("start", (cmd) => {
+        startedCmd = cmd;
+        console.log("[normalize] ffmpeg:", cmd);
+      })
+      .on("error", (err, _stdout, stderr) => {
+        console.error("[normalize] FALHOU (hdr=" + hdr + "):", err.message);
+        console.error("[normalize] comando:", startedCmd);
+        console.error("[normalize] stderr:", stderr || "(vazio)");
+        reject(err);
+      })
       .on("end", () => resolve())
       .save(out);
   });
@@ -128,13 +138,17 @@ function renderVideo(
   const chains: string[] = [];
   const clipLabels: string[] = [];
   clips.forEach((c, i) => {
+    const src = `src${i}`;
     const label = `v${i}`;
-    clipLabels.push(label);
+    // 1) cadeia bruta do clipe -> [src{i}]
     chains.push(
       c.type === "video"
-        ? videoClipChain(i, label, frames[i])
-        : clipChain(i, label, motionForIndex(i), frames[i])
+        ? videoClipChain(i, src, frames[i])
+        : clipChain(i, src, motionForIndex(i), frames[i])
     );
+    // 2) (fix) prep idêntico p/ TODO clipe -> [v{i}] (mesmo tb/fps/sar/pixfmt)
+    chains.push(`[${src}]${XFADE_PREP}[${label}]`);
+    clipLabels.push(label);
   });
 
   const { chains: xchains, lastLabel } = xfadeChain(
@@ -149,6 +163,7 @@ function renderVideo(
   chains.push(fadeChain(lastLabel, totalSeconds, "outv"));
 
   return new Promise((resolve, reject) => {
+    let startedCmd = "";
     command
       .complexFilter(chains.join(";"))
       .outputOptions([
@@ -159,8 +174,16 @@ function renderVideo(
         "-pix_fmt", "yuv420p",
         "-movflags", "+faststart",
       ])
-      .on("start", (cmd) => console.log("[render] ffmpeg cmd:", cmd))
-      .on("error", (err) => reject(err))
+      .on("start", (cmd) => {
+        startedCmd = cmd;
+        console.log("[render] ffmpeg cmd:", cmd);
+      })
+      .on("error", (err, _stdout, stderr) => {
+        console.error("[render] FFmpeg FALHOU:", err.message);
+        console.error("[render] comando:", startedCmd);
+        console.error("[render] stderr:", stderr || "(vazio)");
+        reject(err);
+      })
       .on("end", () => resolve())
       .save(outputPath);
   });

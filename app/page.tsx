@@ -2,6 +2,7 @@
 "use client";
 
 import { useState } from "react";
+import { upload } from "@vercel/blob/client"; // (Fase 8A.2) client upload p/ Vercel Blob
 // (1) NOVO: histórico
 import { addVideo } from "./lib/videoHistory";
 import VideoHistory from "./components/VideoHistory";
@@ -21,8 +22,13 @@ const MUSIC_OPTIONS = [
 const MAX_DIMENSION = 1920;
 const JPEG_QUALITY = 0.8;
 const MAX_TOTAL_BYTES = 4 * 1024 * 1024;
-const MAX_MUSIC_BYTES = 3 * 1024 * 1024; // (Fase 4) limite por MP3 enviado (evita 413 da Vercel)
-const MAX_CAPTION_LEN = 120; // (Fase 5) frase curta
+const MAX_MUSIC_BYTES = 3 * 1024 * 1024; // (Fase 4) limite por MP3 (evita 413 da Vercel)
+const MAX_CAPTION_LEN = 120; // (Fase 5)
+const MAX_VIDEO_BYTES = 200 * 1024 * 1024; // (Fase 8A.2) por vídeo (espelha /api/upload)
+
+const VIDEO_ACCEPT = "video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm";
+
+type VideoItem = { file: File; thumb: string };
 
 function loadImage(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -63,31 +69,84 @@ async function compressImage(file: File): Promise<File> {
   }
 }
 
+// (Fase 8A.1) miniatura de vídeo capturada no navegador
+function makeVideoThumb(file: File): Promise<string> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const v = document.createElement("video");
+    v.preload = "metadata";
+    v.muted = true;
+    v.playsInline = true;
+    let done = false;
+    const finish = (data: string) => {
+      if (done) return;
+      done = true;
+      URL.revokeObjectURL(url);
+      resolve(data);
+    };
+    v.onloadeddata = () => {
+      try {
+        v.currentTime = Math.min(0.1, (v.duration || 1) / 2);
+      } catch {
+        finish("");
+      }
+    };
+    v.onseeked = () => {
+      try {
+        const scale = Math.min(1, 240 / Math.max(v.videoWidth, v.videoHeight));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(v.videoWidth * scale));
+        canvas.height = Math.max(1, Math.round(v.videoHeight * scale));
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return finish("");
+        ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+        finish(canvas.toDataURL("image/jpeg", 0.7));
+      } catch {
+        finish("");
+      }
+    };
+    v.onerror = () => finish("");
+    v.src = url;
+  });
+}
+
 export default function Home() {
-  const [files, setFiles] = useState<File[]>([]);
+  const [files, setFiles] = useState<File[]>([]); // imagens
+  const [videoItems, setVideoItems] = useState<VideoItem[]>([]); // vídeos
   const [duration, setDuration] = useState<Duration>(30);
-  // (Fase 3) música escolhida — default cinematic
   const [musicKey, setMusicKey] = useState<string>("cinematic");
-  // (Fase 4) upload de música própria (opção extra; tem prioridade)
   const [useOwnMusic, setUseOwnMusic] = useState(false);
   const [musicFile, setMusicFile] = useState<File | null>(null);
-  // (Fase 5) legenda opcional no vídeo
   const [caption, setCaption] = useState<string>("");
-  // (Fase 7) NOVO: edição inteligente (cortes na batida + transições pro)
   const [smartEdit, setSmartEdit] = useState(false);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string>("");
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // (2) NOVO: chave para atualizar o histórico ao gerar um vídeo
   const [historyKey, setHistoryKey] = useState(0);
 
-  function onPick(e: React.ChangeEvent<HTMLInputElement>) {
-    setFiles(Array.from(e.target.files ?? []));
+  async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const picked = Array.from(e.target.files ?? []);
+    const imgs = picked.filter((f) => f.type.startsWith("image/"));
+    const vids = picked.filter((f) => f.type.startsWith("video/"));
+
+    setFiles(imgs);
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     setVideoUrl(null);
     setError(null);
     setStatus("");
+
+    const tooBig = vids.filter((f) => f.size > MAX_VIDEO_BYTES);
+    if (tooBig.length > 0) {
+      setError("Alguns vídeos passam de 200 MB e foram ignorados.");
+    }
+    const okVids = vids.filter((f) => f.size <= MAX_VIDEO_BYTES);
+
+    setVideoItems([]);
+    for (const f of okVids) {
+      const thumb = await makeVideoThumb(f);
+      setVideoItems((prev) => [...prev, { file: f, thumb }]);
+    }
   }
 
   function onPickMusic(e: React.ChangeEvent<HTMLInputElement>) {
@@ -116,49 +175,59 @@ export default function Home() {
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     setVideoUrl(null);
 
-    if (files.length === 0) {
-      setError("Selecione pelo menos uma imagem.");
+    if (files.length === 0 && videoItems.length === 0) {
+      setError("Selecione pelo menos uma imagem ou vídeo.");
       return;
     }
 
     setLoading(true);
     try {
-      setStatus("Otimizando imagens...");
-      const compressed: File[] = [];
-      for (let i = 0; i < files.length; i++) {
-        setStatus(`Otimizando imagem ${i + 1} de ${files.length}...`);
-        compressed.push(await compressImage(files[i]));
-      }
-
-      const totalBytes = compressed.reduce((s, f) => s + f.size, 0);
-      if (totalBytes > MAX_TOTAL_BYTES) {
-        throw new Error(
-          "As imagens ainda são muito grandes mesmo após otimização. " +
-            "Tente selecionar menos fotos."
-        );
-      }
-
-      setStatus("Gerando vídeo...");
       const fd = new FormData();
-      compressed.forEach((file, i) => fd.append(`image${i + 1}`, file));
+
+      // imagens: otimiza e anexa (caminho idêntico ao das fases anteriores)
+      if (files.length > 0) {
+        setStatus("Otimizando imagens...");
+        const compressed: File[] = [];
+        for (let i = 0; i < files.length; i++) {
+          setStatus(`Otimizando imagem ${i + 1} de ${files.length}...`);
+          compressed.push(await compressImage(files[i]));
+        }
+        const totalBytes = compressed.reduce((s, f) => s + f.size, 0);
+        if (totalBytes > MAX_TOTAL_BYTES) {
+          throw new Error(
+            "As imagens ainda são muito grandes mesmo após otimização. " +
+              "Tente selecionar menos fotos."
+          );
+        }
+        compressed.forEach((file, i) => fd.append(`image${i + 1}`, file));
+      }
+
+      // (Fase 8A.2) vídeos: upload direto ao Vercel Blob, envia só as URLs
+      for (let i = 0; i < videoItems.length; i++) {
+        setStatus(`Enviando vídeo ${i + 1} de ${videoItems.length}...`);
+        const v = videoItems[i].file;
+        const blob = await upload(v.name, v, {
+          access: "public",
+          handleUploadUrl: "/api/upload",
+          contentType: v.type || "video/mp4",
+        });
+        fd.append(`videoUrl${i + 1}`, blob.url);
+      }
+
       fd.append("duration", String(duration));
-      // (Fase 4) upload próprio tem PRIORIDADE; senão usa a biblioteca
       if (useOwnMusic && musicFile) {
         fd.append("musicFile", musicFile);
       } else {
         fd.append("musicKey", musicKey);
       }
-      // (Fase 5) legenda opcional — só envia se preenchida
       if (caption.trim()) fd.append("caption", caption.trim());
-      // (Fase 7) edição inteligente — só envia quando ligada (default: desligada)
       if (smartEdit) fd.append("smartEdit", "1");
 
+      setStatus("Gerando vídeo...");
       const res = await fetch("/api/render", { method: "POST", body: fd });
 
       if (res.status === 413) {
-        throw new Error(
-          "Upload muito grande para o servidor. Selecione menos fotos."
-        );
+        throw new Error("Upload muito grande para o servidor. Selecione menos fotos.");
       }
 
       const contentType = res.headers.get("content-type") ?? "";
@@ -177,7 +246,6 @@ export default function Home() {
       const url = URL.createObjectURL(blob);
       setVideoUrl(url);
 
-      // (3) NOVO: salva no histórico e atualiza a seção
       try {
         await addVideo(blob, duration);
         setHistoryKey((k) => k + 1);
@@ -187,23 +255,25 @@ export default function Home() {
 
       window.open(url, "_blank");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Erro ao enviar imagens.");
+      setError(e instanceof Error ? e.message : "Erro ao enviar a mídia.");
     } finally {
       setLoading(false);
       setStatus("");
     }
   }
 
+  const hasMedia = files.length > 0 || videoItems.length > 0;
+
   return (
     <main style={styles.page}>
       <div style={styles.card}>
         <h1 style={styles.title}>ViralCut AI</h1>
-        <p style={styles.subtitle}>Transforme suas imagens em Reels verticais</p>
+        <p style={styles.subtitle}>Transforme fotos e vídeos em Reels verticais</p>
 
-        <label style={styles.label}>Imagens</label>
+        <label style={styles.label}>Imagens e vídeos</label>
         <input
           type="file"
-          accept="image/*"
+          accept={`image/*,${VIDEO_ACCEPT}`}
           multiple
           onChange={onPick}
           disabled={loading}
@@ -211,6 +281,25 @@ export default function Home() {
         />
         {files.length > 0 && (
           <p style={styles.fileHint}>{files.length} imagem(ns) selecionada(s)</p>
+        )}
+
+        {videoItems.length > 0 && (
+          <>
+            <div style={styles.thumbsRow}>
+              {videoItems.map((vi, i) => (
+                <div key={i} style={styles.thumb}>
+                  {vi.thumb ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={vi.thumb} alt={vi.file.name} style={styles.thumbImg} />
+                  ) : (
+                    <div style={styles.thumbFallback}>🎬</div>
+                  )}
+                  <span style={styles.thumbBadge}>▶</span>
+                </div>
+              ))}
+            </div>
+            <p style={styles.fileHint}>{videoItems.length} vídeo(s) selecionado(s)</p>
+          </>
         )}
 
         <label style={{ ...styles.label, marginTop: 22 }}>Duração do Reel</label>
@@ -235,7 +324,6 @@ export default function Home() {
           })}
         </div>
 
-        {/* (Fase 3) Seletor de música */}
         <label style={{ ...styles.label, marginTop: 22 }}>Música</label>
         <select
           value={musicKey}
@@ -250,7 +338,6 @@ export default function Home() {
           ))}
         </select>
 
-        {/* (Fase 4) opção extra: usar minha própria música */}
         <label style={styles.ownMusicRow}>
           <input
             type="checkbox"
@@ -275,7 +362,6 @@ export default function Home() {
           </p>
         )}
 
-        {/* (Fase 5) legenda opcional no vídeo */}
         <label style={{ ...styles.label, marginTop: 22 }}>
           Legenda no vídeo (opcional)
         </label>
@@ -292,7 +378,6 @@ export default function Home() {
           {caption.length}/{MAX_CAPTION_LEN} — aparece na parte de baixo do vídeo
         </p>
 
-        {/* (Fase 7) NOVO: toggle de edição inteligente */}
         <label style={styles.ownMusicRow}>
           <input
             type="checkbox"
@@ -305,10 +390,10 @@ export default function Home() {
 
         <button
           onClick={handleSubmit}
-          disabled={loading || files.length === 0}
+          disabled={loading || !hasMedia}
           style={{
             ...styles.cta,
-            ...(loading || files.length === 0 ? styles.ctaDisabled : {}),
+            ...(loading || !hasMedia ? styles.ctaDisabled : {}),
           }}
         >
           {loading ? status || "Processando..." : "Criar Reels"}
@@ -325,7 +410,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* (4) NOVO: seção de histórico */}
         <VideoHistory refreshKey={historyKey} />
       </div>
     </main>
@@ -383,6 +467,35 @@ const styles: Record<string, React.CSSProperties> = {
     boxSizing: "border-box",
   },
   fileHint: { margin: "10px 0 0", fontSize: 13, color: "#8b8b96" },
+  thumbsRow: { display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 },
+  thumb: {
+    position: "relative",
+    width: 64,
+    height: 96,
+    borderRadius: 8,
+    overflow: "hidden",
+    background: "#0f0f16",
+    border: "1px solid rgba(255,255,255,0.1)",
+  },
+  thumbImg: { width: "100%", height: "100%", objectFit: "cover" },
+  thumbFallback: {
+    width: "100%",
+    height: "100%",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 22,
+  },
+  thumbBadge: {
+    position: "absolute",
+    right: 4,
+    bottom: 4,
+    fontSize: 11,
+    color: "#fff",
+    background: "rgba(0,0,0,0.55)",
+    borderRadius: 6,
+    padding: "1px 5px",
+  },
   durationRow: { display: "flex", gap: 10, width: "100%" },
   durationBtn: {
     flex: 1,

@@ -7,6 +7,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import ffmpeg from "fluent-ffmpeg";
 import ffmpegStatic from "ffmpeg-static";
+import { del } from "@vercel/blob";
 // (Fase 6) efeitos/transições isolados
 import {
   FPS,
@@ -18,19 +19,21 @@ import {
 } from "../../lib/transitions";
 // (Fase 7) edição inteligente isolada
 import { beatSyncedFrames, SMART_TRANSITIONS, DEFAULT_BPM } from "../../lib/smartEdit";
+// (Fase 8A.2) clipe de vídeo + guarda anti-SSRF
+import { videoClipChain, isAllowedBlobUrl } from "../../lib/videoClip";
 
-// FFmpeg exige runtime Node (não Edge) e execução dinâmica.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 300; // segundos (limite depende do seu plano Vercel)
+export const maxDuration = 300;
 
 if (ffmpegStatic) {
   ffmpeg.setFfmpegPath(ffmpegStatic as unknown as string);
 }
 
 const ALLOWED_DURATIONS = [15, 30, 45, 60];
+const MAX_VIDEO_BYTES = 200 * 1024 * 1024; // espelha o cap da rota de upload
 
-// === Fase 3: biblioteca de músicas (seleção por categoria) ===
+// === Fase 3: biblioteca de músicas ===
 const MUSIC_DIR = path.join(process.cwd(), "public", "music");
 const MUSIC_FILES: Record<string, string> = {
   cinematic: "cinematic.mp3",
@@ -40,55 +43,51 @@ const MUSIC_FILES: Record<string, string> = {
   viral: "viral.mp3",
 };
 const DEFAULT_MUSIC = "cinematic";
-const MUSIC_VOLUME = 0.15; // 15%
+const MUSIC_VOLUME = 0.15;
 
-// === Fase 5: legenda no vídeo (drawtext) ===
+// === Fase 5: legenda ===
 const CAPTION_FONT = path.join(process.cwd(), "assets", "fonts", "DejaVuSans-Bold.ttf");
 const CAPTION_MAX_LEN = 120;
 const CAPTION_WRAP = 22;
 
+// (Fase 8A.2) um clipe da timeline: imagem (Ken Burns) ou vídeo (normalizado)
+type Clip = { type: "image" | "video"; file: string };
+
 /**
- * Gera o vídeo vertical 1080x1920 com efeito Ken Burns/zoom/pan por imagem.
+ * Gera o vídeo vertical 1080x1920 a partir de uma lista de clipes mistos.
  *
- * (Fase 6) corte seco virou crossfade (xfade) + fade in/out.
- * (Fase 7) modo `smartEdit`: cortes sincronizados a uma grade de batidas
- *   aproximada (BPM assumido) + paleta de transições profissionais.
- *   Quando `smartEdit` é false (padrão), o comportamento é EXATAMENTE o da
- *   Fase 6. O modo inteligente mantém a MESMA soma de frames, então a duração
- *   final é idêntica à do modo normal (15/30/45/60s preservados).
+ * Cada clipe ocupa um "slot" de frames (mesma distribuição das fases
+ * anteriores), então a duração final continua EXATA (15/30/45/60s) e o
+ * crossfade/fades/Edição Inteligente funcionam igual. Imagens usam Ken
+ * Burns/zoom/pan; vídeos são normalizados (scale/pad + clone/trim) para o slot.
  */
 function renderVideo(
-  dir: string,
   outputPath: string,
-  count: number,
-  _secondsPerImage: number,
+  clips: Clip[],
   totalSeconds: number,
   smartEdit = false
 ): Promise<void> {
-  // (Fase 7) distribuição de frames: inteligente (na batida) ou normal
+  const count = clips.length;
   const frames = smartEdit
     ? beatSyncedFrames(totalSeconds, count, DEFAULT_BPM, FPS)
     : computeFramesPerImage(totalSeconds, count, FPS);
-
-  // (Fase 7) transições: paleta pro no modo inteligente; "fade" no normal
   const transitions = smartEdit ? SMART_TRANSITIONS : ["fade"];
 
   const command = ffmpeg();
-  for (let i = 0; i < count; i++) {
-    command.input(path.join(dir, `${i + 1}.png`));
-  }
+  clips.forEach((c) => command.input(c.file));
 
   const chains: string[] = [];
-
-  // 1) cadeia de cada imagem (Ken Burns / zoom / pan) -> [v0..v{count-1}]
   const clipLabels: string[] = [];
-  for (let i = 0; i < count; i++) {
+  clips.forEach((c, i) => {
     const label = `v${i}`;
     clipLabels.push(label);
-    chains.push(clipChain(i, label, motionForIndex(i), frames[i]));
-  }
+    chains.push(
+      c.type === "video"
+        ? videoClipChain(i, label, frames[i])
+        : clipChain(i, label, motionForIndex(i), frames[i])
+    );
+  });
 
-  // 2) transições entre clipes (xfade encadeado)
   const { chains: xchains, lastLabel } = xfadeChain(
     clipLabels,
     frames,
@@ -98,15 +97,11 @@ function renderVideo(
     transitions
   );
   chains.push(...xchains);
-
-  // 3) fade in / fade out na saída final -> [outv]
   chains.push(fadeChain(lastLabel, totalSeconds, "outv"));
-
-  const filterGraph = chains.join(";");
 
   return new Promise((resolve, reject) => {
     command
-      .complexFilter(filterGraph)
+      .complexFilter(chains.join(";"))
       .outputOptions([
         "-map", "[outv]",
         "-r", String(FPS),
@@ -165,7 +160,6 @@ async function drawCaption(
     `box=1:boxcolor=black@0.55:boxborderw=24:` +
     `x=(w-text_w)/2:y=h-text_h-180`;
 
-  console.log("[caption] aplicando legenda:", JSON.stringify(caption));
   await new Promise<void>((resolve, reject) => {
     ffmpeg()
       .input(videoPath)
@@ -183,15 +177,12 @@ async function drawCaption(
   });
 }
 
-// === Fase 2B: música de fundo, passo isolado (copia o vídeo, não re-renderiza) ===
+// === Fase 2B: música de fundo, passo isolado ===
 function mixBackgroundMusic(
   videoPath: string,
   musicPath: string,
   outPath: string
 ): Promise<void> {
-  console.log("[mix] videoPath=", videoPath);
-  console.log("[mix] musicPath=", musicPath);
-  console.log("[mix] outPath=", outPath);
   return new Promise((resolve, reject) => {
     ffmpeg()
       .input(videoPath)
@@ -214,43 +205,85 @@ function mixBackgroundMusic(
 export async function POST(req: NextRequest) {
   const jobId = randomUUID();
   const tmpDir = path.join(os.tmpdir(), "viralcut-renders", jobId);
+  const blobUrlsToDelete: string[] = [];
 
   try {
     const form = await req.formData();
 
-    const files: File[] = [];
+    // imagens (caminho idêntico ao das fases anteriores)
+    const imageFiles: File[] = [];
     for (const [key, value] of form.entries()) {
       if (key.startsWith("image") && value instanceof File && value.size > 0) {
-        files.push(value);
+        imageFiles.push(value);
       }
     }
-    if (files.length === 0) {
+    // (Fase 8A.2) URLs de vídeos já enviados ao Vercel Blob
+    const videoUrls: string[] = [];
+    for (const [key, value] of form.entries()) {
+      if (key.startsWith("videoUrl") && typeof value === "string" && value.trim()) {
+        videoUrls.push(value.trim());
+      }
+    }
+
+    if (imageFiles.length === 0 && videoUrls.length === 0) {
       return NextResponse.json(
-        { ok: false, jobId, error: "Nenhuma imagem recebida." },
+        { ok: false, jobId, error: "Nenhuma mídia recebida." },
         { status: 400 }
       );
     }
 
     let duration = Number(form.get("duration") || 30);
     if (!ALLOWED_DURATIONS.includes(duration)) duration = 30;
-    const secondsPerImage = duration / files.length;
-
-    // (Fase 7) flag de edição inteligente (default OFF -> fallback Fase 6)
     const smartEdit = String(form.get("smartEdit") || "") === "1";
 
     console.log(
-      `[render] jobId=${jobId} | duration=${duration}s | imagens=${files.length} | ` +
-        `segPorImagem=${secondsPerImage} | smartEdit=${smartEdit}`
+      `[render] jobId=${jobId} | duration=${duration}s | imagens=${imageFiles.length} | ` +
+        `videos=${videoUrls.length} | smartEdit=${smartEdit}`
     );
 
     await mkdir(tmpDir, { recursive: true });
-    for (let i = 0; i < files.length; i++) {
-      const buffer = Buffer.from(await files[i].arrayBuffer());
-      await writeFile(path.join(tmpDir, `${i + 1}.png`), buffer);
+
+    const clips: Clip[] = [];
+
+    // 1) salva imagens -> clipes de imagem
+    for (let i = 0; i < imageFiles.length; i++) {
+      const p = path.join(tmpDir, `${i + 1}.png`);
+      await writeFile(p, Buffer.from(await imageFiles[i].arrayBuffer()));
+      clips.push({ type: "image", file: p });
+    }
+
+    // 2) baixa vídeos do Blob (com guarda anti-SSRF + limite de tamanho)
+    for (let i = 0; i < videoUrls.length; i++) {
+      const url = videoUrls[i];
+      if (!isAllowedBlobUrl(url)) {
+        console.warn("[render] URL de vídeo rejeitada (host inválido):", url);
+        continue;
+      }
+      blobUrlsToDelete.push(url);
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        console.warn("[render] falha ao baixar vídeo:", url, resp.status);
+        continue;
+      }
+      const buf = Buffer.from(await resp.arrayBuffer());
+      if (buf.byteLength > MAX_VIDEO_BYTES) {
+        console.warn("[render] vídeo acima do limite, ignorado:", url);
+        continue;
+      }
+      const p = path.join(tmpDir, `vid${i + 1}.mp4`);
+      await writeFile(p, buf);
+      clips.push({ type: "video", file: p });
+    }
+
+    if (clips.length === 0) {
+      return NextResponse.json(
+        { ok: false, jobId, error: "Nenhuma mídia válida para renderizar." },
+        { status: 400 }
+      );
     }
 
     const outputPath = path.join(tmpDir, "video.mp4");
-    await renderVideo(tmpDir, outputPath, files.length, secondsPerImage, duration, smartEdit);
+    await renderVideo(outputPath, clips, duration, smartEdit);
 
     // === Fase 5: legenda opcional ===
     const caption = sanitizeCaption(String(form.get("caption") || ""));
@@ -274,12 +307,10 @@ export async function POST(req: NextRequest) {
       const customPath = path.join(tmpDir, "custom-music.mp3");
       await writeFile(customPath, Buffer.from(await uploadedMusic.arrayBuffer()));
       musicPath = customPath;
-      console.log("[render] música enviada pelo usuário:", uploadedMusic.size, "bytes");
     } else {
       const requestedMusic = String(form.get("musicKey") || DEFAULT_MUSIC);
       const safeMusicKey = MUSIC_FILES[requestedMusic] ? requestedMusic : DEFAULT_MUSIC;
       musicPath = path.join(MUSIC_DIR, MUSIC_FILES[safeMusicKey]);
-      console.log("[render] musicKey=", safeMusicKey, "file=", MUSIC_FILES[safeMusicKey]);
     }
 
     // === Fase 2B: adiciona música se existir ===
@@ -316,5 +347,11 @@ export async function POST(req: NextRequest) {
     );
   } finally {
     await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    // (Fase 8A.2) limpa os vídeos do Blob após o render (privacidade + custo)
+    if (blobUrlsToDelete.length > 0) {
+      await del(blobUrlsToDelete).catch((e) =>
+        console.warn("[render] falha ao apagar blobs:", e)
+      );
+    }
   }
 }

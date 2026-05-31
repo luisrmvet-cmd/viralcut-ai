@@ -1,17 +1,42 @@
 // app/components/SuccessScreen.tsx
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type Props = {
   videoUrl: string;
   onReset: () => void;
 };
 
+// (Fase 8B.1) Detecta iOS — iPhone/iPod e também iPadOS 13+, que se reporta
+// como "MacIntel" mas tem touch. No iOS, o download programático é ignorado
+// pelo WebKit e o vídeo abre no player; orientamos o usuário a salvar.
+function detectIOS(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  const isAppleMobile = /iPad|iPhone|iPod/.test(ua);
+  const isIPadOS =
+    navigator.platform === "MacIntel" && (navigator.maxTouchPoints ?? 0) > 1;
+  return isAppleMobile || isIPadOS;
+}
+
 export default function SuccessScreen({ videoUrl, onReset }: Props) {
   const [downloading, setDownloading] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
+
+  // calculado no cliente para evitar divergência de hidratação
+  useEffect(() => {
+    setIsIOS(detectIOS());
+  }, []);
 
   async function handleDownload() {
+    // No iOS o download forçado não funciona: abrimos o vídeo para o usuário
+    // salvar pelo menu de compartilhamento (ver instrução abaixo do botão).
+    if (isIOS) {
+      window.open(videoUrl, "_blank");
+      return;
+    }
+
     setDownloading(true);
     try {
       // videoUrl é uma URL REMOTA (Vercel Blob). O atributo `download` é
@@ -30,14 +55,18 @@ export default function SuccessScreen({ videoUrl, onReset }: Props) {
       // folga antes de revogar para não cancelar um download em andamento
       setTimeout(() => URL.revokeObjectURL(objectUrl), 4000);
     } catch {
-      // Fallback (inclui iOS/Safari, onde o download programático pode não
-      // disparar): abre o vídeo numa nova aba para o usuário salvar pelo
-      // menu de compartilhamento.
+      // Fallback: abre o vídeo numa nova aba para o usuário salvar manualmente.
       window.open(videoUrl, "_blank");
     } finally {
       setDownloading(false);
     }
   }
+
+  const downloadLabel = isIOS
+    ? "Abrir vídeo para salvar"
+    : downloading
+    ? "Preparando download..."
+    : "⬇  Baixar Vídeo";
 
   return (
     <div style={styles.wrap}>
@@ -58,8 +87,15 @@ export default function SuccessScreen({ videoUrl, onReset }: Props) {
           ...(downloading ? styles.downloadBtnDisabled : {}),
         }}
       >
-        {downloading ? "Preparando download..." : "⬇  Baixar Vídeo"}
+        {downloadLabel}
       </button>
+
+      {isIOS && (
+        <p style={styles.iosHint}>
+          No iPhone, toque em compartilhar e escolha Salvar em Arquivos ou
+          Salvar Vídeo.
+        </p>
+      )}
 
       <button type="button" onClick={onReset} style={styles.againBtn}>
         ↺  Gerar Outro Vídeo
@@ -133,6 +169,13 @@ const styles: Record<string, React.CSSProperties> = {
     opacity: 0.55,
     cursor: "not-allowed",
     boxShadow: "none",
+  },
+  iosHint: {
+    margin: "12px 4px 0",
+    fontSize: 13,
+    lineHeight: 1.45,
+    color: "#9aa0ae",
+    maxWidth: 320,
   },
   againBtn: {
     width: "100%",

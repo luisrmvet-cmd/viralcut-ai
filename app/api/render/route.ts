@@ -9,25 +9,12 @@ import { randomUUID } from "node:crypto";
 import ffmpeg from "fluent-ffmpeg";
 import ffmpegStatic from "ffmpeg-static";
 import { del } from "@vercel/blob";
-// (Fase 6) efeitos/transições
-import {
-  FPS,
-  clipChain,
-  motionForIndex,
-  framesPerImage as computeFramesPerImage,
-  xfadeChain,
-  fadeChain,
-} from "../../lib/transitions";
-// (Fase 7) edição inteligente
-import { beatSyncedFrames, SMART_TRANSITIONS, DEFAULT_BPM } from "../../lib/smartEdit";
-// (Fase 8A.2) clipe de vídeo + normalização + guarda anti-SSRF
-import {
-  videoClipChain,
-  isAllowedBlobUrl,
-  NORMALIZE_VF_SDR,
-  NORMALIZE_VF_HDR,
-  XFADE_PREP,
-} from "../../lib/videoClip";
+// (Fase 6) Ken Burns/zoom/pan por imagem
+import { FPS, clipChain, motionForIndex } from "../../lib/transitions";
+// (Fase 7) BPM da edição inteligente (cortes no ritmo)
+import { DEFAULT_BPM } from "../../lib/smartEdit";
+// (Fase 8A.2) normalização de vídeo + guarda anti-SSRF
+import { NORMALIZE_VF_SDR, NORMALIZE_VF_HDR, isAllowedBlobUrl } from "../../lib/videoClip";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,6 +26,17 @@ if (ffmpegStatic) {
 
 const ALLOWED_DURATIONS = [15, 30, 45, 60];
 const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
+
+// Codec idêntico para TODO clipe baked (essencial p/ o concat demuxer com -c copy)
+const CLIP_ENC = [
+  "-r", String(FPS),
+  "-c:v", "libx264",
+  "-preset", "veryfast",
+  "-crf", "20",
+  "-pix_fmt", "yuv420p",
+  "-an",
+  "-movflags", "+faststart",
+];
 
 // === Fase 3: biblioteca de músicas ===
 const MUSIC_DIR = path.join(process.cwd(), "public", "music");
@@ -57,12 +55,9 @@ const CAPTION_FONT = path.join(process.cwd(), "assets", "fonts", "DejaVuSans-Bol
 const CAPTION_MAX_LEN = 120;
 const CAPTION_WRAP = 22;
 
-type Clip = { type: "image" | "video"; file: string };
+type Clip = { type: "image" | "video"; file: string; hdr?: boolean };
 
-/**
- * (Fase 8A.2 fix) Detecta HDR (HLG/PQ) lendo o stderr do `ffmpeg -i`.
- * Não usa ffprobe (que não está instalado no projeto).
- */
+/** (8A.2) Detecta HDR (HLG/PQ) pelo stderr do `ffmpeg -i` (sem precisar de ffprobe). */
 function probeIsHDR(srcPath: string): Promise<boolean> {
   return new Promise((resolve) => {
     const bin = ffmpegStatic as unknown as string;
@@ -76,117 +71,172 @@ function probeIsHDR(srcPath: string): Promise<boolean> {
 }
 
 /**
- * (Fase 8A.2 fix) Normaliza um vídeo (iPhone/HEVC/HDR/MOV/VFR) em um passo
- * SEPARADO, ANTES do render misto: extrai só a 1ª faixa de vídeo (-map 0:v:0,
- * ignora áudio/timecode/dados), tonemap se HDR, e reescreve em H.264/yuv420p/
- * SDR/30fps CFR a 1080x1920. Isso elimina o "ffmpeg code 234" que acontecia ao
- * jogar o vídeo cru direto na filtergraph complexa do render.
+ * (Fix mídia mista) Distribui os frames por clipe somando EXATAMENTE
+ * round(totalSeconds*FPS) — sem compensação de xfade, pois agora concatenamos
+ * (corte seco), sem sobreposição. smartEdit alinha os cortes a uma grade de
+ * batida aproximada (BPM); senão, divisão uniforme. A duração final fica exata.
  */
-function normalizeVideo(src: string, out: string, hdr: boolean): Promise<void> {
-  const vf = hdr ? NORMALIZE_VF_HDR : NORMALIZE_VF_SDR;
+function slotFrames(totalSeconds: number, count: number, smartEdit: boolean): number[] {
+  const total = Math.round(totalSeconds * FPS);
+  const even = (tot: number, n: number) => {
+    const base = Math.floor(tot / n);
+    let rem = tot - base * n;
+    return Array.from({ length: n }, () => {
+      const e = rem > 0 ? 1 : 0;
+      if (rem > 0) rem--;
+      return base + e;
+    });
+  };
+  if (smartEdit && count > 1) {
+    const bf = Math.max(1, Math.round((60 / DEFAULT_BPM) * FPS));
+    const totalBeats = Math.floor(total / bf);
+    if (totalBeats >= count) {
+      const base = Math.floor(totalBeats / count);
+      let rem = totalBeats - base * count;
+      const beats = Array.from({ length: count }, () => {
+        const e = rem > 0 ? 1 : 0;
+        if (rem > 0) rem--;
+        return base + e;
+      });
+      const fr = beats.map((b) => b * bf);
+      fr[fr.length - 1] += total - fr.reduce((a, b) => a + b, 0);
+      if (Math.min(...fr) > 0) return fr;
+    }
+  }
+  return even(total, count);
+}
+
+/** Loga falha do FFmpeg com o COMANDO exato e o stderr completo. */
+function attachLogging(
+  cmdObj: ffmpeg.FfmpegCommand,
+  tag: string,
+  resolve: () => void,
+  reject: (e: Error) => void
+) {
+  let startedCmd = "";
+  cmdObj
+    .on("start", (cmd) => {
+      startedCmd = cmd;
+      console.log(`[${tag}] ffmpeg:`, cmd);
+    })
+    .on("error", (err: Error, _stdout?: string, stderr?: string) => {
+      console.error(`[${tag}] FALHOU:`, err.message);
+      console.error(`[${tag}] comando:`, startedCmd);
+      console.error(`[${tag}] stderr:`, stderr || "(vazio)");
+      reject(err);
+    })
+    .on("end", () => resolve());
+}
+
+/** Bakeia UM clipe de imagem (Ken Burns) em MP4 normalizado de `frames` quadros. */
+function bakeImageClip(
+  imgPath: string,
+  outPath: string,
+  effect: ReturnType<typeof motionForIndex>,
+  frames: number
+): Promise<void> {
   return new Promise((resolve, reject) => {
-    let startedCmd = "";
-    ffmpeg(src)
-      .outputOptions([
-        "-map", "0:v:0",
-        "-an", "-sn", "-dn",
-        "-vf", vf,
-        "-r", String(FPS),
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-crf", "20",
-        "-pix_fmt", "yuv420p",
-        "-color_primaries", "bt709",
-        "-color_trc", "bt709",
-        "-colorspace", "bt709",
-        "-movflags", "+faststart",
-      ])
-      .on("start", (cmd) => {
-        startedCmd = cmd;
-        console.log("[normalize] ffmpeg:", cmd);
-      })
-      .on("error", (err, _stdout, stderr) => {
-        console.error("[normalize] FALHOU (hdr=" + hdr + "):", err.message);
-        console.error("[normalize] comando:", startedCmd);
-        console.error("[normalize] stderr:", stderr || "(vazio)");
-        reject(err);
-      })
-      .on("end", () => resolve())
-      .save(out);
+    const cmd = ffmpeg(imgPath)
+      .complexFilter(clipChain(0, "v", effect, frames))
+      .outputOptions(["-map", "[v]", ...CLIP_ENC]);
+    attachLogging(cmd, "bake-img", resolve, reject);
+    cmd.save(outPath);
   });
 }
 
 /**
- * Gera o vídeo vertical 1080x1920 a partir de clipes mistos (imagem/vídeo).
- * Cada clipe ocupa um "slot" de frames (duração final continua exata).
+ * Bakeia UM clipe de vídeo (iPhone/HEVC/HDR/MOV) em MP4 normalizado de `frames`
+ * quadros, numa única passada: -map 0:v:0 (ignora áudio/timecode/dados),
+ * tonemap se HDR, scale/pad 1080x1920, fps 30, tpad clone + trim p/ o slot,
+ * H.264/yuv420p. Saída idêntica ao clipe de imagem -> concat -c copy seguro.
  */
-function renderVideo(
+function bakeVideoClip(
+  rawPath: string,
+  outPath: string,
+  frames: number,
+  hdr: boolean
+): Promise<void> {
+  const baseVf = hdr ? NORMALIZE_VF_HDR : NORMALIZE_VF_SDR;
+  const vf =
+    `${baseVf},fps=${FPS},setpts=PTS-STARTPTS,` +
+    `tpad=stop=-1:stop_mode=clone,trim=end_frame=${frames},` +
+    `setpts=PTS-STARTPTS,format=yuv420p`;
+  return new Promise((resolve, reject) => {
+    const cmd = ffmpeg(rawPath).outputOptions([
+      "-map", "0:v:0",
+      "-an", "-sn", "-dn",
+      "-vf", vf,
+      "-r", String(FPS),
+      "-c:v", "libx264",
+      "-preset", "veryfast",
+      "-crf", "20",
+      "-pix_fmt", "yuv420p",
+      "-color_primaries", "bt709",
+      "-color_trc", "bt709",
+      "-colorspace", "bt709",
+      "-movflags", "+faststart",
+    ]);
+    attachLogging(cmd, "bake-vid", resolve, reject);
+    cmd.save(outPath);
+  });
+}
+
+/** Concatena os clipes baked (todos idênticos) com o concat demuxer + -c copy. */
+function concatClips(listPath: string, outPath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cmd = ffmpeg()
+      .input(listPath)
+      .inputOptions(["-f", "concat", "-safe", "0"])
+      .outputOptions(["-c", "copy", "-movflags", "+faststart"]);
+    attachLogging(cmd, "concat", resolve, reject);
+    cmd.save(outPath);
+  });
+}
+
+/**
+ * Render principal (mídia mista) — SEM xfade:
+ *  1) bakeia cada clipe (imagem ou vídeo) em MP4 normalizado idêntico;
+ *  2) concatena com o concat demuxer (corte seco).
+ * Música e legenda são aplicadas DEPOIS, no vídeo final.
+ */
+async function renderVideo(
   outputPath: string,
   clips: Clip[],
   totalSeconds: number,
-  smartEdit = false
+  smartEdit: boolean,
+  tmpDir: string
 ): Promise<void> {
-  const count = clips.length;
-  const frames = smartEdit
-    ? beatSyncedFrames(totalSeconds, count, DEFAULT_BPM, FPS)
-    : computeFramesPerImage(totalSeconds, count, FPS);
-  const transitions = smartEdit ? SMART_TRANSITIONS : ["fade"];
+  const frames = slotFrames(totalSeconds, clips.length, smartEdit);
+  const clipPaths: string[] = [];
 
-  const command = ffmpeg();
-  clips.forEach((c) => command.input(c.file));
+  for (let i = 0; i < clips.length; i++) {
+    const c = clips[i];
+    const outClip = path.join(tmpDir, `clip${i}.mp4`);
+    if (c.type === "video") {
+      try {
+        await bakeVideoClip(c.file, outClip, frames[i], c.hdr === true);
+      } catch (e1) {
+        if (c.hdr) {
+          console.warn("[render] bake HDR falhou; tentando SDR simples:", e1);
+          await bakeVideoClip(c.file, outClip, frames[i], false);
+        } else {
+          throw e1;
+        }
+      }
+    } else {
+      await bakeImageClip(c.file, outClip, motionForIndex(i), frames[i]);
+    }
+    clipPaths.push(outClip);
+  }
 
-  const chains: string[] = [];
-  const clipLabels: string[] = [];
-  clips.forEach((c, i) => {
-    const src = `src${i}`;
-    const label = `v${i}`;
-    // 1) cadeia bruta do clipe -> [src{i}]
-    chains.push(
-      c.type === "video"
-        ? videoClipChain(i, src, frames[i])
-        : clipChain(i, src, motionForIndex(i), frames[i])
-    );
-    // 2) (fix) prep idêntico p/ TODO clipe -> [v{i}] (mesmo tb/fps/sar/pixfmt)
-    chains.push(`[${src}]${XFADE_PREP}[${label}]`);
-    clipLabels.push(label);
-  });
-
-  const { chains: xchains, lastLabel } = xfadeChain(
-    clipLabels,
-    frames,
-    totalSeconds,
-    count,
-    FPS,
-    transitions
+  // concat demuxer
+  const listPath = path.join(tmpDir, "concat.txt");
+  await writeFile(
+    listPath,
+    clipPaths.map((p) => `file '${p}'`).join("\n") + "\n",
+    "utf8"
   );
-  chains.push(...xchains);
-  chains.push(fadeChain(lastLabel, totalSeconds, "outv"));
-
-  return new Promise((resolve, reject) => {
-    let startedCmd = "";
-    command
-      .complexFilter(chains.join(";"))
-      .outputOptions([
-        "-map", "[outv]",
-        "-r", String(FPS),
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-pix_fmt", "yuv420p",
-        "-movflags", "+faststart",
-      ])
-      .on("start", (cmd) => {
-        startedCmd = cmd;
-        console.log("[render] ffmpeg cmd:", cmd);
-      })
-      .on("error", (err, _stdout, stderr) => {
-        console.error("[render] FFmpeg FALHOU:", err.message);
-        console.error("[render] comando:", startedCmd);
-        console.error("[render] stderr:", stderr || "(vazio)");
-        reject(err);
-      })
-      .on("end", () => resolve())
-      .save(outputPath);
-  });
+  await concatClips(listPath, outputPath);
 }
 
 // === Fase 5: legenda (drawtext) ===
@@ -231,7 +281,7 @@ async function drawCaption(
     `box=1:boxcolor=black@0.55:boxborderw=24:` +
     `x=(w-text_w)/2:y=h-text_h-180`;
   await new Promise<void>((resolve, reject) => {
-    ffmpeg()
+    const cmd = ffmpeg()
       .input(videoPath)
       .videoFilters(filter)
       .outputOptions([
@@ -240,21 +290,20 @@ async function drawCaption(
         "-crf", "18",
         "-pix_fmt", "yuv420p",
         "-movflags", "+faststart",
-      ])
-      .on("error", (err) => reject(err))
-      .on("end", () => resolve())
-      .save(outPath);
+      ]);
+    attachLogging(cmd, "caption", resolve, reject);
+    cmd.save(outPath);
   });
 }
 
-// === Fase 2B: música de fundo ===
+// === Fase 2B: música de fundo (copia o vídeo, não re-renderiza) ===
 function mixBackgroundMusic(
   videoPath: string,
   musicPath: string,
   outPath: string
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    ffmpeg()
+    const cmd = ffmpeg()
       .input(videoPath)
       .input(musicPath)
       .inputOptions(["-stream_loop", "-1"])
@@ -265,10 +314,9 @@ function mixBackgroundMusic(
         "-c:v", "copy",
         "-c:a", "aac",
         "-shortest",
-      ])
-      .on("error", (err) => reject(err))
-      .on("end", () => resolve())
-      .save(outPath);
+      ]);
+    attachLogging(cmd, "music", resolve, reject);
+    cmd.save(outPath);
   });
 }
 
@@ -313,14 +361,14 @@ export async function POST(req: NextRequest) {
 
     const clips: Clip[] = [];
 
-    // 1) imagens -> clipes de imagem (caminho idêntico ao das fases anteriores)
+    // imagens -> clipes de imagem
     for (let i = 0; i < imageFiles.length; i++) {
-      const p = path.join(tmpDir, `${i + 1}.png`);
+      const p = path.join(tmpDir, `img${i + 1}.png`);
       await writeFile(p, Buffer.from(await imageFiles[i].arrayBuffer()));
       clips.push({ type: "image", file: p });
     }
 
-    // 2) vídeos: baixa do Blob -> NORMALIZA (passo separado) -> clipe de vídeo
+    // vídeos -> baixa do Blob, detecta HDR, vira clipe de vídeo
     for (let i = 0; i < videoUrls.length; i++) {
       const url = videoUrls[i];
       if (!isAllowedBlobUrl(url)) {
@@ -340,27 +388,8 @@ export async function POST(req: NextRequest) {
       }
       const rawPath = path.join(tmpDir, `vid${i + 1}_raw`);
       await writeFile(rawPath, buf);
-
-      // normaliza (iPhone/HEVC/HDR/MOV/VFR -> H.264/yuv420p/SDR/30fps/1080x1920)
       const hdr = await probeIsHDR(rawPath);
-      const normPath = path.join(tmpDir, `vid${i + 1}.mp4`);
-      try {
-        await normalizeVideo(rawPath, normPath, hdr);
-      } catch (e1) {
-        if (hdr) {
-          console.warn("[render] normalização HDR falhou; tentando conversão simples:", e1);
-          try {
-            await normalizeVideo(rawPath, normPath, false);
-          } catch (e2) {
-            console.error("[render] normalização falhou; vídeo ignorado:", e2);
-            continue;
-          }
-        } else {
-          console.error("[render] normalização falhou; vídeo ignorado:", e1);
-          continue;
-        }
-      }
-      if (existsSync(normPath)) clips.push({ type: "video", file: normPath });
+      clips.push({ type: "video", file: rawPath, hdr });
     }
 
     if (clips.length === 0) {
@@ -370,16 +399,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const outputPath = path.join(tmpDir, "video.mp4");
-    await renderVideo(outputPath, clips, duration, smartEdit);
+    // 1) render principal: bake de cada clipe + concat demuxer
+    const baseVideo = path.join(tmpDir, "video.mp4");
+    await renderVideo(baseVideo, clips, duration, smartEdit, tmpDir);
 
-    // === Fase 5: legenda opcional ===
+    // 2) legenda opcional (Fase 5)
     const caption = sanitizeCaption(String(form.get("caption") || ""));
-    let videoForMusic = outputPath;
+    let videoForMusic = baseVideo;
     if (caption && existsSync(CAPTION_FONT)) {
       const captionedPath = path.join(tmpDir, "video-caption.mp4");
       try {
-        await drawCaption(outputPath, caption, captionedPath, tmpDir);
+        await drawCaption(baseVideo, caption, captionedPath, tmpDir);
         if (existsSync(captionedPath)) videoForMusic = captionedPath;
       } catch (e) {
         console.error("[render] falha ao aplicar legenda; seguindo sem legenda:", e);
@@ -388,7 +418,7 @@ export async function POST(req: NextRequest) {
       console.warn("[render] legenda solicitada mas fonte não encontrada em", CAPTION_FONT);
     }
 
-    // === Fase 4/3: música própria (prioridade) ou biblioteca ===
+    // 3) música (Fase 4/3/2B)
     const uploadedMusic = form.get("musicFile");
     let musicPath: string;
     if (uploadedMusic instanceof File && uploadedMusic.size > 0) {
@@ -401,7 +431,6 @@ export async function POST(req: NextRequest) {
       musicPath = path.join(MUSIC_DIR, MUSIC_FILES[safeMusicKey]);
     }
 
-    // === Fase 2B: adiciona música se existir ===
     let deliverPath = videoForMusic;
     if (existsSync(musicPath)) {
       const withMusicPath = path.join(tmpDir, "video-music.mp4");

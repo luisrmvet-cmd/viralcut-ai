@@ -3,6 +3,13 @@
 
 import { useEffect, useState } from "react";
 
+// (DIAGNÓSTICO 8B.2) Painel visível para depurar a detecção de iOS.
+// Aparece quando NÃO estamos em produção OU quando `debug` é true.
+// Para esconder em produção, deixe `debug = false` e refaça o deploy.
+const debug = true;
+const BUILD_TAG = "8B.2-debug";
+const SHOW_DEBUG = process.env.NODE_ENV !== "production" || debug;
+
 type Props = {
   videoUrl: string;
   onReset: () => void;
@@ -25,9 +32,26 @@ export default function SuccessScreen({ videoUrl, onReset }: Props) {
   const [isIOS, setIsIOS] = useState(false);
   const [iosMsg, setIosMsg] = useState<string | null>(null);
 
+  // (DIAGNÓSTICO) dados crus de detecção para exibir no card
+  const [dbg, setDbg] = useState<{
+    ios: boolean;
+    ua: string;
+    platform: string;
+    mtp: number;
+  } | null>(null);
+
   // calculado no cliente para evitar divergência de hidratação
   useEffect(() => {
-    setIsIOS(detectIOS());
+    const ios = detectIOS();
+    setIsIOS(ios);
+    if (SHOW_DEBUG && typeof navigator !== "undefined") {
+      setDbg({
+        ios,
+        ua: navigator.userAgent || "(vazio)",
+        platform: navigator.platform || "(vazio)",
+        mtp: navigator.maxTouchPoints ?? 0,
+      });
+    }
   }, []);
 
   // DESKTOP/ANDROID: baixa o MP4 de verdade (inalterado).
@@ -110,6 +134,27 @@ export default function SuccessScreen({ videoUrl, onReset }: Props) {
 
   return (
     <div style={styles.wrap}>
+      {/* (DIAGNÓSTICO 8B.2) card amarelo — remova quando terminar */}
+      {SHOW_DEBUG && (
+        <div style={styles.debugBox}>
+          <div>
+            <strong>BUILD:</strong> {BUILD_TAG}
+          </div>
+          <div>
+            <strong>isIOS:</strong> {dbg ? String(dbg.ios) : "(montando...)"}
+          </div>
+          <div style={styles.debugUa}>
+            <strong>userAgent:</strong> {dbg?.ua ?? "—"}
+          </div>
+          <div>
+            <strong>platform:</strong> {dbg?.platform ?? "—"}
+          </div>
+          <div>
+            <strong>maxTouchPoints:</strong> {dbg ? dbg.mtp : "—"}
+          </div>
+        </div>
+      )}
+
       <div style={styles.badge}>✓</div>
       <h2 style={styles.title}>Seu Reel está pronto!</h2>
       <p style={styles.subtitle}>
@@ -169,6 +214,20 @@ const styles: Record<string, React.CSSProperties> = {
       "radial-gradient(420px 180px at 50% 0%, rgba(34,197,94,0.10) 0%, rgba(20,20,28,0) 70%)",
     border: "1px solid rgba(34,197,94,0.18)",
   },
+  debugBox: {
+    width: "100%",
+    marginBottom: 16,
+    padding: "12px 14px",
+    borderRadius: 12,
+    background: "rgba(250, 204, 21, 0.12)",
+    border: "1px solid rgba(250, 204, 21, 0.5)",
+    color: "#fde68a",
+    fontSize: 12,
+    lineHeight: 1.5,
+    textAlign: "left",
+    wordBreak: "break-all",
+  },
+  debugUa: { marginTop: 4, marginBottom: 4, opacity: 0.9 },
   badge: {
     width: 56,
     height: 56,

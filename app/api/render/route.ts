@@ -375,23 +375,19 @@ export async function POST(req: NextRequest) {
     }
 
     // vídeos -> baixa do Blob, detecta HDR, vira clipe de vídeo
-    console.log("[render-debug] videoUrls recebidas:", videoUrls);
     for (let i = 0; i < videoUrls.length; i++) {
       const url = videoUrls[i];
-      console.log("[render-debug] tentando videoUrl:", url);
       if (!isAllowedBlobUrl(url)) {
         console.warn("[render] URL de vídeo rejeitada (host inválido):", url);
         continue;
       }
       blobUrlsToDelete.push(url);
       const resp = await fetch(url);
-      console.log("[render-debug] fetch video status:", resp.status, resp.ok);
       if (!resp.ok) {
         console.warn("[render] falha ao baixar vídeo:", url, resp.status);
         continue;
       }
       const buf = Buffer.from(await resp.arrayBuffer());
-      console.log("[render-debug] video bytes:", buf.byteLength);
       if (buf.byteLength > MAX_VIDEO_BYTES) {
         console.warn("[render] vídeo acima do limite, ignorado:", url);
         continue;
@@ -410,18 +406,6 @@ export async function POST(req: NextRequest) {
     }
 
     // 1) render principal: bake de cada clipe + concat demuxer
-    // DEBUG TEMPORÁRIO (remover depois): se houver vídeo, renderiza SÓ os vídeos
-    // para isolar se o problema é no bake/download do vídeo ou na mistura/concat.
-    const onlyVideos = clips.filter((c) => c.type === "video");
-    if (onlyVideos.length > 0) {
-      clips.length = 0;
-      clips.push(...onlyVideos);
-    }
-    console.log(
-      "[render-debug] clips finais:",
-      clips.map((c) => c.type)
-    );
-
     const baseVideo = path.join(tmpDir, "video.mp4");
     await renderVideo(baseVideo, clips, duration, smartEdit, tmpDir);
 

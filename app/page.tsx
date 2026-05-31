@@ -146,15 +146,6 @@ export default function Home() {
 
   function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const picked = Array.from(e.target.files ?? []);
-    // DEBUG TEMPORÁRIO (remover depois): inspeciona o que o iOS reporta
-    alert(
-      picked
-        .map(
-          (f, i) =>
-            `${i + 1}: name=${f.name} | type=${f.type || "(vazio)"} | size=${f.size}`
-        )
-        .join("\n")
-    );
     const videos = picked.filter((f) => isVideo(f));
     const imgs = picked.filter((f) => !isVideo(f));
 

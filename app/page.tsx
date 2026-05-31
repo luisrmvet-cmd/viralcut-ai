@@ -4,7 +4,6 @@
 import { useState } from "react";
 import { upload } from "@vercel/blob/client"; // (Fase 8A.2) client upload p/ Vercel Blob
 // (1) NOVO: histórico
-import { addVideo } from "./lib/videoHistory";
 import VideoHistory from "./components/VideoHistory";
 
 const DURATIONS = [15, 30, 45, 60] as const;
@@ -265,36 +264,14 @@ export default function Home() {
 
       setStatus("Gerando vídeo...");
       const res = await fetch("/api/render", { method: "POST", body: fd });
-
-      if (res.status === 413) {
-        throw new Error("Upload muito grande para o servidor. Selecione menos fotos.");
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok || !data?.url) {
+        throw new Error(data?.error || `Erro HTTP ${res.status}`);
       }
-
-      const contentType = res.headers.get("content-type") ?? "";
-      if (!res.ok || contentType.includes("application/json")) {
-        let message = `Erro HTTP ${res.status}`;
-        try {
-          const data = await res.json();
-          message = data?.error || message;
-        } catch {
-          /* mantém a mensagem padrão */
-        }
-        throw new Error(message);
-      }
-
-      const data = await res.json();
-      if (!data?.url) throw new Error("Resposta sem URL do vídeo.");
+      if (videoUrl) URL.revokeObjectURL(videoUrl);
       setVideoUrl(data.url);
-
-      try {
-        const histBlob = await fetch(data.url).then((r) => r.blob());
-        await addVideo(histBlob, duration);
-        setHistoryKey((k) => k + 1);
-      } catch {
-        /* falha ao salvar histórico não impede o uso do vídeo atual */
-      }
-
-      window.open(data.url, "_blank");
+      setHistoryKey((k) => k + 1);
+      setStatus("Vídeo gerado!");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao enviar a mídia.");
     } finally {

@@ -2,13 +2,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { writeFile, mkdir, readFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { spawn } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import ffmpeg from "fluent-ffmpeg";
 import ffmpegStatic from "ffmpeg-static";
 import { del } from "@vercel/blob";
-// (Fase 6) efeitos/transições isolados
+// (Fase 6) efeitos/transições
 import {
   FPS,
   clipChain,
@@ -17,10 +18,15 @@ import {
   xfadeChain,
   fadeChain,
 } from "../../lib/transitions";
-// (Fase 7) edição inteligente isolada
+// (Fase 7) edição inteligente
 import { beatSyncedFrames, SMART_TRANSITIONS, DEFAULT_BPM } from "../../lib/smartEdit";
-// (Fase 8A.2) clipe de vídeo + guarda anti-SSRF
-import { videoClipChain, isAllowedBlobUrl } from "../../lib/videoClip";
+// (Fase 8A.2) clipe de vídeo + normalização + guarda anti-SSRF
+import {
+  videoClipChain,
+  isAllowedBlobUrl,
+  NORMALIZE_VF_SDR,
+  NORMALIZE_VF_HDR,
+} from "../../lib/videoClip";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,7 +37,7 @@ if (ffmpegStatic) {
 }
 
 const ALLOWED_DURATIONS = [15, 30, 45, 60];
-const MAX_VIDEO_BYTES = 200 * 1024 * 1024; // espelha o cap da rota de upload
+const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
 
 // === Fase 3: biblioteca de músicas ===
 const MUSIC_DIR = path.join(process.cwd(), "public", "music");
@@ -50,16 +56,59 @@ const CAPTION_FONT = path.join(process.cwd(), "assets", "fonts", "DejaVuSans-Bol
 const CAPTION_MAX_LEN = 120;
 const CAPTION_WRAP = 22;
 
-// (Fase 8A.2) um clipe da timeline: imagem (Ken Burns) ou vídeo (normalizado)
 type Clip = { type: "image" | "video"; file: string };
 
 /**
- * Gera o vídeo vertical 1080x1920 a partir de uma lista de clipes mistos.
- *
- * Cada clipe ocupa um "slot" de frames (mesma distribuição das fases
- * anteriores), então a duração final continua EXATA (15/30/45/60s) e o
- * crossfade/fades/Edição Inteligente funcionam igual. Imagens usam Ken
- * Burns/zoom/pan; vídeos são normalizados (scale/pad + clone/trim) para o slot.
+ * (Fase 8A.2 fix) Detecta HDR (HLG/PQ) lendo o stderr do `ffmpeg -i`.
+ * Não usa ffprobe (que não está instalado no projeto).
+ */
+function probeIsHDR(srcPath: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const bin = ffmpegStatic as unknown as string;
+    if (!bin) return resolve(false);
+    let err = "";
+    const p = spawn(bin, ["-hide_banner", "-i", srcPath]);
+    p.stderr.on("data", (d) => (err += d.toString()));
+    p.on("close", () => resolve(/smpte2084|arib-std-b67|bt2020/i.test(err)));
+    p.on("error", () => resolve(false));
+  });
+}
+
+/**
+ * (Fase 8A.2 fix) Normaliza um vídeo (iPhone/HEVC/HDR/MOV/VFR) em um passo
+ * SEPARADO, ANTES do render misto: extrai só a 1ª faixa de vídeo (-map 0:v:0,
+ * ignora áudio/timecode/dados), tonemap se HDR, e reescreve em H.264/yuv420p/
+ * SDR/30fps CFR a 1080x1920. Isso elimina o "ffmpeg code 234" que acontecia ao
+ * jogar o vídeo cru direto na filtergraph complexa do render.
+ */
+function normalizeVideo(src: string, out: string, hdr: boolean): Promise<void> {
+  const vf = hdr ? NORMALIZE_VF_HDR : NORMALIZE_VF_SDR;
+  return new Promise((resolve, reject) => {
+    ffmpeg(src)
+      .outputOptions([
+        "-map", "0:v:0",
+        "-an", "-sn", "-dn",
+        "-vf", vf,
+        "-r", String(FPS),
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "20",
+        "-pix_fmt", "yuv420p",
+        "-color_primaries", "bt709",
+        "-color_trc", "bt709",
+        "-colorspace", "bt709",
+        "-movflags", "+faststart",
+      ])
+      .on("start", (cmd) => console.log("[normalize] ffmpeg:", cmd))
+      .on("error", (err) => reject(err))
+      .on("end", () => resolve())
+      .save(out);
+  });
+}
+
+/**
+ * Gera o vídeo vertical 1080x1920 a partir de clipes mistos (imagem/vídeo).
+ * Cada clipe ocupa um "slot" de frames (duração final continua exata).
  */
 function renderVideo(
   outputPath: string,
@@ -117,7 +166,7 @@ function renderVideo(
   });
 }
 
-// === Fase 5: legenda (drawtext), passo isolado ===
+// === Fase 5: legenda (drawtext) ===
 function sanitizeCaption(raw: string): string {
   return (raw || "")
     .replace(/[\r\n\t]+/g, " ")
@@ -150,7 +199,6 @@ async function drawCaption(
 ): Promise<void> {
   const textFilePath = path.join(tmpDir, "caption.txt");
   await writeFile(textFilePath, wrapCaption(caption), "utf8");
-
   const escPath = (p: string) => p.replace(/\\/g, "/").replace(/:/g, "\\:");
   const filter =
     `drawtext=fontfile='${escPath(CAPTION_FONT)}':` +
@@ -159,7 +207,6 @@ async function drawCaption(
     `fontcolor=white:fontsize=60:line_spacing=12:` +
     `box=1:boxcolor=black@0.55:boxborderw=24:` +
     `x=(w-text_w)/2:y=h-text_h-180`;
-
   await new Promise<void>((resolve, reject) => {
     ffmpeg()
       .input(videoPath)
@@ -177,7 +224,7 @@ async function drawCaption(
   });
 }
 
-// === Fase 2B: música de fundo, passo isolado ===
+// === Fase 2B: música de fundo ===
 function mixBackgroundMusic(
   videoPath: string,
   musicPath: string,
@@ -210,14 +257,12 @@ export async function POST(req: NextRequest) {
   try {
     const form = await req.formData();
 
-    // imagens (caminho idêntico ao das fases anteriores)
     const imageFiles: File[] = [];
     for (const [key, value] of form.entries()) {
       if (key.startsWith("image") && value instanceof File && value.size > 0) {
         imageFiles.push(value);
       }
     }
-    // (Fase 8A.2) URLs de vídeos já enviados ao Vercel Blob
     const videoUrls: string[] = [];
     for (const [key, value] of form.entries()) {
       if (key.startsWith("videoUrl") && typeof value === "string" && value.trim()) {
@@ -245,14 +290,14 @@ export async function POST(req: NextRequest) {
 
     const clips: Clip[] = [];
 
-    // 1) salva imagens -> clipes de imagem
+    // 1) imagens -> clipes de imagem (caminho idêntico ao das fases anteriores)
     for (let i = 0; i < imageFiles.length; i++) {
       const p = path.join(tmpDir, `${i + 1}.png`);
       await writeFile(p, Buffer.from(await imageFiles[i].arrayBuffer()));
       clips.push({ type: "image", file: p });
     }
 
-    // 2) baixa vídeos do Blob (com guarda anti-SSRF + limite de tamanho)
+    // 2) vídeos: baixa do Blob -> NORMALIZA (passo separado) -> clipe de vídeo
     for (let i = 0; i < videoUrls.length; i++) {
       const url = videoUrls[i];
       if (!isAllowedBlobUrl(url)) {
@@ -270,9 +315,29 @@ export async function POST(req: NextRequest) {
         console.warn("[render] vídeo acima do limite, ignorado:", url);
         continue;
       }
-      const p = path.join(tmpDir, `vid${i + 1}.mp4`);
-      await writeFile(p, buf);
-      clips.push({ type: "video", file: p });
+      const rawPath = path.join(tmpDir, `vid${i + 1}_raw`);
+      await writeFile(rawPath, buf);
+
+      // normaliza (iPhone/HEVC/HDR/MOV/VFR -> H.264/yuv420p/SDR/30fps/1080x1920)
+      const hdr = await probeIsHDR(rawPath);
+      const normPath = path.join(tmpDir, `vid${i + 1}.mp4`);
+      try {
+        await normalizeVideo(rawPath, normPath, hdr);
+      } catch (e1) {
+        if (hdr) {
+          console.warn("[render] normalização HDR falhou; tentando conversão simples:", e1);
+          try {
+            await normalizeVideo(rawPath, normPath, false);
+          } catch (e2) {
+            console.error("[render] normalização falhou; vídeo ignorado:", e2);
+            continue;
+          }
+        } else {
+          console.error("[render] normalização falhou; vídeo ignorado:", e1);
+          continue;
+        }
+      }
+      if (existsSync(normPath)) clips.push({ type: "video", file: normPath });
     }
 
     if (clips.length === 0) {
@@ -347,7 +412,6 @@ export async function POST(req: NextRequest) {
     );
   } finally {
     await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-    // (Fase 8A.2) limpa os vídeos do Blob após o render (privacidade + custo)
     if (blobUrlsToDelete.length > 0) {
       await del(blobUrlsToDelete).catch((e) =>
         console.warn("[render] falha ao apagar blobs:", e)

@@ -127,14 +127,7 @@ export default function Home() {
 
   async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const picked = Array.from(e.target.files ?? []);
-    alert(
-picked
-.map(
-(f, i) =>
-`${i + 1}: name=${f.name} | type=${f.type || "(vazio)"} | size=${f.size}`
-)
-.join("\n")
-);
+    
     const isVideo = (f: File) => {
 const name = f.name.toLowerCase();
 return (

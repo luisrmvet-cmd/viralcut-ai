@@ -115,11 +115,11 @@ function attachLogging(
 ) {
   let startedCmd = "";
   cmdObj
-    .on("start", (cmd) => {
+    .on("start", (cmd: string) => {
       startedCmd = cmd;
       console.log(`[${tag}] ffmpeg:`, cmd);
     })
-    .on("error", (err: Error, _stdout?: string, stderr?: string) => {
+    .on("error", (err: Error, _stdout: string | null, stderr: string | null) => {
       console.error(`[${tag}] FALHOU:`, err.message);
       console.error(`[${tag}] comando:`, startedCmd);
       console.error(`[${tag}] stderr:`, stderr || "(vazio)");

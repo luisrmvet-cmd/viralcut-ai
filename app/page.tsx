@@ -25,10 +25,26 @@ const MAX_TOTAL_BYTES = 4 * 1024 * 1024;
 const MAX_MUSIC_BYTES = 3 * 1024 * 1024; // (Fase 4) limite por MP3 (evita 413 da Vercel)
 const MAX_CAPTION_LEN = 120; // (Fase 5)
 const MAX_VIDEO_BYTES = 200 * 1024 * 1024; // (Fase 8A.2) por vídeo (espelha /api/upload)
+const THUMB_TIMEOUT_MS = 3000; // (Fix 8A.2) miniatura nunca trava a UI
 
 const VIDEO_ACCEPT = "video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm";
 
-type VideoItem = { file: File; thumb: string };
+// (Fix iOS) No Safari/iPhone o file.type de um vídeo pode vir vazio ("") ou
+// fora do padrão "video/". Reconhecemos vídeo por MIME (inclui video/quicktime)
+// OU por extensão (.mov, .mp4, .webm, .m4v, .qt).
+function isVideo(f: File): boolean {
+  return f.type.startsWith("video/") || /\.(mov|mp4|m4v|webm|qt)$/i.test(f.name);
+}
+
+// (Fix iOS) contentType para o upload quando o file.type vier vazio.
+function videoContentType(f: File): string {
+  if (f.type) return f.type;
+  if (/\.mov$/i.test(f.name)) return "video/quicktime";
+  if (/\.webm$/i.test(f.name)) return "video/webm";
+  return "video/mp4";
+}
+
+type VideoItem = { file: File; thumb: string | null };
 
 function loadImage(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -69,7 +85,9 @@ async function compressImage(file: File): Promise<File> {
   }
 }
 
-// (Fase 8A.1) miniatura de vídeo capturada no navegador
+// (Fase 8A.1 / Fix 8A.2) miniatura de vídeo capturada no navegador.
+// SEMPRE resolve (com timeout); em Safari/iOS pode resolver "" e usamos o
+// placeholder. NUNCA bloqueia a seleção do vídeo.
 function makeVideoThumb(file: File): Promise<string> {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(file);
@@ -81,9 +99,11 @@ function makeVideoThumb(file: File): Promise<string> {
     const finish = (data: string) => {
       if (done) return;
       done = true;
+      clearTimeout(timer);
       URL.revokeObjectURL(url);
       resolve(data);
     };
+    const timer = setTimeout(() => finish(""), THUMB_TIMEOUT_MS);
     v.onloadeddata = () => {
       try {
         v.currentTime = Math.min(0.1, (v.duration || 1) / 2);
@@ -125,38 +145,47 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [historyKey, setHistoryKey] = useState(0);
 
-  async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+  function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const picked = Array.from(e.target.files ?? []);
-    
-    const isVideo = (f: File) => {
-const name = f.name.toLowerCase();
-return (
-f.type.startsWith("video/") ||
-name.endsWith(".mov") ||
-name.endsWith(".mp4") ||
-name.endsWith(".webm")
-);
-};
-
-const vids = picked.filter((f) => isVideo(f));
-const imgs = picked.filter((f) => !isVideo(f));
+    // DEBUG TEMPORÁRIO (remover depois): inspeciona o que o iOS reporta
+    alert(
+      picked
+        .map(
+          (f, i) =>
+            `${i + 1}: name=${f.name} | type=${f.type || "(vazio)"} | size=${f.size}`
+        )
+        .join("\n")
+    );
+    const videos = picked.filter((f) => isVideo(f));
+    const imgs = picked.filter((f) => !isVideo(f));
 
     setFiles(imgs);
+    setVideoItems([]); // reset: o loop abaixo usa [...prev], então começa do zero
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     setVideoUrl(null);
     setError(null);
     setStatus("");
 
-    const tooBig = vids.filter((f) => f.size > MAX_VIDEO_BYTES);
+    const tooBig = videos.filter((f) => f.size > MAX_VIDEO_BYTES);
     if (tooBig.length > 0) {
       setError("Alguns vídeos passam de 200 MB e foram ignorados.");
     }
-    const okVids = vids.filter((f) => f.size <= MAX_VIDEO_BYTES);
+    const okVids = videos.filter((f) => f.size <= MAX_VIDEO_BYTES);
 
-    setVideoItems([]);
     for (const f of okVids) {
-      const thumb = await makeVideoThumb(f);
-      setVideoItems((prev) => [...prev, { file: f, thumb }]);
+      // 1) adiciona o vídeo IMEDIATAMENTE (não espera a miniatura)
+      setVideoItems((prev) => [...prev, { file: f, thumb: null }]);
+      // 2) tenta gerar a thumb em segundo plano; 3) se gerar, atualiza o item;
+      // 4) se falhar/travar, o vídeo continua selecionado mesmo sem thumb.
+      makeVideoThumb(f)
+        .then((thumb) => {
+          setVideoItems((prev) =>
+            prev.map((item) => (item.file === f ? { ...item, thumb } : item))
+          );
+        })
+        .catch((err) => {
+          console.warn("[onPick] thumb falhou, vídeo mantido:", f.name, f.type, err);
+        });
     }
   }
 
@@ -181,7 +210,7 @@ const imgs = picked.filter((f) => !isVideo(f));
     setMusicFile(f);
   }
 
-    async function handleSubmit() {
+  async function handleSubmit() {
     setError(null);
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     setVideoUrl(null);
@@ -220,7 +249,7 @@ const imgs = picked.filter((f) => !isVideo(f));
         const blob = await upload(v.name, v, {
           access: "public",
           handleUploadUrl: "/api/upload",
-          contentType: v.type || "video/mp4",
+          contentType: videoContentType(v),
         });
         fd.append(`videoUrl${i + 1}`, blob.url);
       }
@@ -290,27 +319,28 @@ const imgs = picked.filter((f) => !isVideo(f));
           disabled={loading}
           style={styles.fileInput}
         />
-        {files.length > 0 && (
-          <p style={styles.fileHint}>{files.length} imagem(ns) selecionada(s)</p>
+
+        {/* (Fix 8A.2) contador único e claro */}
+        {hasMedia && (
+          <p style={styles.fileHint}>
+            {files.length} imagem(ns), {videoItems.length} vídeo(s)
+          </p>
         )}
 
         {videoItems.length > 0 && (
-          <>
-            <div style={styles.thumbsRow}>
-              {videoItems.map((vi, i) => (
-                <div key={i} style={styles.thumb}>
-                  {vi.thumb ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={vi.thumb} alt={vi.file.name} style={styles.thumbImg} />
-                  ) : (
-                    <div style={styles.thumbFallback}>🎬</div>
-                  )}
-                  <span style={styles.thumbBadge}>▶</span>
-                </div>
-              ))}
-            </div>
-            <p style={styles.fileHint}>{videoItems.length} vídeo(s) selecionado(s)</p>
-          </>
+          <div style={styles.thumbsRow}>
+            {videoItems.map((vi, i) => (
+              <div key={i} style={styles.thumb}>
+                {vi.thumb ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={vi.thumb} alt={vi.file.name} style={styles.thumbImg} />
+                ) : (
+                  <div style={styles.thumbFallback}>🎬</div>
+                )}
+                <span style={styles.thumbBadge}>▶</span>
+              </div>
+            ))}
+          </div>
         )}
 
         <label style={{ ...styles.label, marginTop: 22 }}>Duração do Reel</label>

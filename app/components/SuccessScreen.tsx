@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
 // Aparece quando NÃO estamos em produção OU quando `debug` é true.
 // Para esconder em produção, deixe `debug = false` e refaça o deploy.
 const debug = true;
-const BUILD_TAG = "8B.2-debug";
+const BUILD_TAG = "LUIS-TESTE-999";
 const SHOW_DEBUG = process.env.NODE_ENV !== "production" || debug;
 
 type Props = {

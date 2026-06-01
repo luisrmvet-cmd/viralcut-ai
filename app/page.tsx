@@ -5,6 +5,7 @@ import { useState } from "react";
 import { upload } from "@vercel/blob/client"; // (Fase 8A.2) client upload p/ Vercel Blob
 // (1) NOVO: histórico
 import VideoHistory from "./components/VideoHistory";
+import SuccessScreen from "./components/SuccessScreen";
 
 const DURATIONS = [15, 30, 45, 60] as const;
 type Duration = (typeof DURATIONS)[number];
@@ -143,6 +144,15 @@ export default function Home() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [historyKey, setHistoryKey] = useState(0);
+  function handleReset() {
+if (videoUrl) URL.revokeObjectURL(videoUrl);
+setVideoUrl(null);
+setFiles([]);
+setVideoItems([]);
+setError(null);
+setStatus("");
+window.scrollTo({ top: 0, behavior: "smooth" });
+}
 
   function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const picked = Array.from(e.target.files ?? []);
@@ -411,14 +421,7 @@ export default function Home() {
 
         {error && <p style={styles.error}>{error}</p>}
 
-        {videoUrl && (
-          <div style={styles.result}>
-            <video src={videoUrl} controls style={styles.video} />
-            <a href={videoUrl} download="viralcut.mp4" style={styles.download}>
-              ⬇ Baixar MP4
-            </a>
-          </div>
-        )}
+        {videoUrl && <SuccessScreen videoUrl={videoUrl} onReset={handleReset} />}
 
         <VideoHistory refreshKey={historyKey} />
       </div>

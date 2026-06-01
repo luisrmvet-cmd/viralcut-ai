@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 // (DIAGNÓSTICO 8B.2) Painel visível para depurar a detecção de iOS.
 // Aparece quando NÃO estamos em produção OU quando `debug` é true.
 // Para esconder em produção, deixe `debug = false` e refaça o deploy.
-const debug = true;
+const debug = false;
 const BUILD_TAG = "LUIS-TESTE-999";
 const SHOW_DEBUG = process.env.NODE_ENV !== "production" || debug;
 

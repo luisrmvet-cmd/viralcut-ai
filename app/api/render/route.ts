@@ -1,6 +1,6 @@
 // app/api/render/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { writeFile, mkdir, readFile, rm } from "node:fs/promises";
+import { writeFile, mkdir, readFile, rm, copyFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import os from "node:os";
@@ -164,7 +164,12 @@ function bakeVideoClip(
   return new Promise((resolve, reject) => {
     const cmd = ffmpeg(rawPath).outputOptions([
       "-map", "0:v:0",
-      "-an", "-sn", "-dn",
+    "-map", "0:a?",
+"-c:a", "aac",
+"-b:a", "160k",
+"-ac", "2",
+"-ar", "44100",
+"-sn", "-dn",
       "-vf", vf,
       "-r", String(FPS),
       "-c:v", "libx264",
@@ -441,7 +446,13 @@ export async function POST(req: NextRequest) {
     if (existsSync(musicPath)) {
       const withMusicPath = path.join(tmpDir, "video-music.mp4");
       try {
-        await mixBackgroundMusic(videoForMusic, musicPath, withMusicPath);
+        if (process.env.SKIP_MUSIC === "1") {
+// TESTE TEMPORÁRIO — diagnóstico de áudio. Remover depois.
+console.warn("[render] SKIP_MUSIC=1 — pulando mixBackgroundMusic; entregando vídeo sem música");
+await copyFile(videoForMusic, withMusicPath);
+} else {
+await mixBackgroundMusic(videoForMusic, musicPath, withMusicPath);
+}
         if (existsSync(withMusicPath)) deliverPath = withMusicPath;
       } catch (e) {
         console.error("[render] falha ao adicionar música; vídeo sem áudio:", e);
@@ -451,11 +462,23 @@ export async function POST(req: NextRequest) {
     // sobe o MP4 final ao Vercel Blob e devolve a URL (evita "Load failed" no
     // iOS por segurar conexão longa + baixar binário grande inline).
     const videoBuffer = await readFile(deliverPath);
-    const uploaded = await put(`renders/viralcut-${jobId}.mp4`, videoBuffer, {
-      access: "public",
-      contentType: "video/mp4",
-    });
-    return NextResponse.json({ ok: true, url: uploaded.url });
+
+try {
+  const uploaded = await put(`renders/viralcut-${jobId}.mp4`, videoBuffer, {
+    access: "public",
+    contentType: "video/mp4",
+  });
+  return NextResponse.json({ ok: true, url: uploaded.url });
+} catch (e) {
+  // Só local + sem token: não derruba o render. Caso contrário, mantém o comportamento atual.
+  if (process.env.NODE_ENV === "production") throw e;
+  console.warn("[render] Vercel Blob sem token no local — usando data URL para teste:", e);
+  return NextResponse.json({
+    ok: true,
+    url: `data:video/mp4;base64,${videoBuffer.toString("base64")}`,
+    local: true,
+  });
+}
   } catch (err) {
     console.error("[render] ERRO:", err);
     return NextResponse.json(
@@ -469,9 +492,9 @@ export async function POST(req: NextRequest) {
   } finally {
     await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     if (blobUrlsToDelete.length > 0) {
-      await del(blobUrlsToDelete).catch((e) =>
-        console.warn("[render] falha ao apagar blobs:", e)
-      );
-    }
-  }
+try {
+await del(blobUrlsToDelete);
+} catch (e) {
+console.warn("[render] falha ao apagar blobs:", e);
 }
+}}}

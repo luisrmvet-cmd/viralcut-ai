@@ -129,7 +129,21 @@ function makeVideoThumb(file: File): Promise<string> {
     v.src = url;
   });
 }
-
+// (Fase 9) lê a duração do vídeo no cliente (sem ffprobe no servidor).
+function getVideoDurationSec(file: File): Promise<number> {
+return new Promise((resolve) => {
+const url = URL.createObjectURL(file);
+const v = document.createElement("video");
+v.preload = "metadata";
+v.onloadedmetadata = () => {
+const d = Number.isFinite(v.duration) ? v.duration : 0;
+URL.revokeObjectURL(url);
+resolve(d);
+};
+v.onerror = () => { URL.revokeObjectURL(url); resolve(0); };
+v.src = url;
+});
+}
 export default function Home() {
   const [files, setFiles] = useState<File[]>([]); // imagens
   const [videoItems, setVideoItems] = useState<VideoItem[]>([]); // vídeos
@@ -139,6 +153,7 @@ export default function Home() {
   const [musicFile, setMusicFile] = useState<File | null>(null);
   const [caption, setCaption] = useState<string>("");
   const [smartEdit, setSmartEdit] = useState(false);
+  const [autoCut, setAutoCut] = useState(false); // (Fase 9) AutoCut AI — OFF por padrão
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string>("");
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -262,6 +277,14 @@ window.scrollTo({ top: 0, behavior: "smooth" });
       }
       if (caption.trim()) fd.append("caption", caption.trim());
       if (smartEdit) fd.append("smartEdit", "1");
+      // (Fase 9) AutoCut: só com 1 vídeo e 0 imagens; manda flag + duração.
+if (autoCut && files.length === 0 && videoItems.length === 1) {
+const srcDur = await getVideoDurationSec(videoItems[0].file);
+if (srcDur > 0) {
+fd.append("autoCut", "1");
+fd.append("autoCutSourceDuration", String(srcDur));
+}
+}
 
       setStatus("Gerando vídeo...");
       const res = await fetch("/api/render", { method: "POST", body: fd });
@@ -406,6 +429,16 @@ window.scrollTo({ top: 0, behavior: "smooth" });
             disabled={loading}
           />
           Edição Inteligente (cortes no ritmo + transições profissionais)
+        </label>
+        
+        <label style={styles.ownMusicRow}>
+          <input
+            type="checkbox"
+            checked={autoCut}
+            onChange={(e) => setAutoCut(e.target.checked)}
+            disabled={loading}
+          />
+          AutoCut AI (cortar vídeo longo em trechos distribuídos)
         </label>
 
         <button

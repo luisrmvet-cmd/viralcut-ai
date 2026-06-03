@@ -15,7 +15,8 @@ import { FPS, clipChain, motionForIndex } from "../../lib/transitions";
 import { DEFAULT_BPM } from "../../lib/smartEdit";
 // (Fase 8A.2) normalização de vídeo + guarda anti-SSRF
 import { NORMALIZE_VF_SDR, NORMALIZE_VF_HDR, isAllowedBlobUrl } from "../../lib/videoClip";
-
+import { transcribeWords } from "../../lib/transcribe";
+import { buildCaptionsAss, type CaptionStyle } from "../../lib/captions";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -209,6 +210,52 @@ function concatClips(listPath: string, outPath: string): Promise<void> {
   });
 }
 
+// ---------- Legendas automáticas (Fase 11A) ----------
+
+// ffmpeg filtergraph: escapa barras e dois-pontos (necessário no Windows local)
+function escapeFilterPath(p: string): string {
+  return p.replace(/\\/g, "/").replace(/:/g, "\\:");
+}
+
+function extractAudioForCaptions(videoPath: string, outPath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cmd = ffmpeg(videoPath).outputOptions([
+      "-map", "0:a:0",
+      "-vn",
+      "-ac", "1",
+      "-ar", "16000",
+      "-c:a", "aac",
+      "-b:a", "64k",
+    ]);
+    attachLogging(cmd, "captions-audio", resolve, reject);
+    cmd.save(outPath);
+  });
+}
+
+function burnCaptions(
+  videoPath: string,
+  assPath: string,
+  fontsDir: string,
+  outPath: string
+): Promise<void> {
+  const vf = `subtitles=filename=${escapeFilterPath(assPath)}:fontsdir=${escapeFilterPath(fontsDir)}`;
+  return new Promise((resolve, reject) => {
+    const cmd = ffmpeg(videoPath).outputOptions([
+      "-map", "0:v:0",
+      "-map", "0:a?",
+      "-c:a", "copy",
+      "-vf", vf,
+      "-r", String(FPS),
+      "-c:v", "libx264",
+      "-preset", "veryfast",
+      "-pix_fmt", "yuv420p",
+      "-movflags", "+faststart",
+    ]);
+    attachLogging(cmd, "caption-burn", resolve, reject);
+    cmd.save(outPath);
+  });
+}
+// ------------------------------------------------------
 /**
  * Render principal (mídia mista) — SEM xfade:
  *  1) bakeia cada clipe (imagem ou vídeo) em MP4 normalizado idêntico;
@@ -374,6 +421,16 @@ export async function POST(req: NextRequest) {
     let duration = Number(form.get("duration") || 30);
     if (!ALLOWED_DURATIONS.includes(duration)) duration = 30;
     const smartEdit = String(form.get("smartEdit") || "") === "1";
+    // Legendas automáticas (Fase 11A): apenas 15s/30s nesta fase
+const captionsRequested = String(form.get("captions") || "") === "1";
+const rawCaptionStyle = String(form.get("captionStyle") || "classico");
+const captionStyle: CaptionStyle =
+rawCaptionStyle === "karaoke" || rawCaptionStyle === "boxed"
+? rawCaptionStyle
+: "classico";
+
+const captionsActive = captionsRequested && (duration === 15 || duration === 30);
+
 
     console.log(
       `[render] jobId=${jobId} | duration=${duration}s | imagens=${imageFiles.length} | ` +
@@ -473,7 +530,43 @@ await mixBackgroundMusic(videoForMusic, musicPath, withMusicPath);
       }
     }
 
-    // sobe o MP4 final ao Vercel Blob e devolve a URL (evita "Load failed" no
+    // ---------- Legendas automáticas (Fase 11A) ----------
+    if (captionsActive) {
+      try {
+        const tCap = Date.now();
+        const asrAudioPath = path.join(tmpDir, "captions-audio.m4a");
+        // áudio pré-música (voz limpa para o ASR); timeline idêntica à do deliverPath
+        await extractAudioForCaptions(videoForMusic, asrAudioPath);
+
+        const words = await transcribeWords(asrAudioPath, { language: "pt" });
+        console.log(`[captions] palavras transcritas: ${words.length}`);
+
+        if (words.length > 0) {
+          const assPath = path.join(tmpDir, "captions.ass");
+          await writeFile(
+            assPath,
+            buildCaptionsAss(words, {
+              style: captionStyle,
+              width: 1080,
+              height: 1920,
+              fontName: "DejaVu Sans",
+            }),
+            "utf8"
+          );
+
+          const fontsDir = path.join(process.cwd(), "assets", "fonts");
+          const captionedPath = path.join(tmpDir, "captioned.mp4");
+          await burnCaptions(deliverPath, assPath, fontsDir, captionedPath);
+          await copyFile(captionedPath, deliverPath);
+        }
+        console.log(`[perf] captions: ${Date.now() - tCap}ms`);
+      } catch (err) {
+        console.error("[captions] falhou, seguindo sem legenda:", err);
+      }
+    }
+    // ------------------------------------------------------
+
+       // sobe o MP4 final ao Vercel Blob e devolve a URL (evita "Load failed" no
     // iOS por segurar conexão longa + baixar binário grande inline).
     const videoBuffer = await readFile(deliverPath);
 

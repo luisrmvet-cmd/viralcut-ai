@@ -31,7 +31,7 @@ const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
 const CLIP_ENC = [
   "-r", String(FPS),
   "-c:v", "libx264",
-  "-preset", "veryfast",
+  "-preset", "ultrafast",
   "-crf", "20",
   "-pix_fmt", "yuv420p",
   "-an",

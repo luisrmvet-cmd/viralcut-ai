@@ -48,7 +48,7 @@ const MUSIC_FILES: Record<string, string> = {
   viral: "viral.mp3",
 };
 const DEFAULT_MUSIC = "cinematic";
-const MUSIC_VOLUME = 1.0;
+const MUSIC_VOLUME = 0.25;
 
 // === Fase 5: legenda ===
 const CAPTION_FONT = path.join(process.cwd(), "assets", "fonts", "DejaVuSans-Bold.ttf");

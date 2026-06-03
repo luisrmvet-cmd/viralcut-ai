@@ -48,7 +48,7 @@ const MUSIC_FILES: Record<string, string> = {
   viral: "viral.mp3",
 };
 const DEFAULT_MUSIC = "cinematic";
-const MUSIC_VOLUME = 0.15;
+const MUSIC_VOLUME = 1.0;
 
 // === Fase 5: legenda ===
 const CAPTION_FONT = path.join(process.cwd(), "assets", "fonts", "DejaVuSans-Bold.ttf");
@@ -318,14 +318,21 @@ function mixBackgroundMusic(
       .input(videoPath)
       .input(musicPath)
       .inputOptions(["-stream_loop", "-1"])
-      .complexFilter(`[1:a]volume=${MUSIC_VOLUME}[a]`)
-      .outputOptions([
-        "-map", "0:v",
-        "-map", "[a]",
-        "-c:v", "copy",
-        "-c:a", "aac",
-        "-shortest",
-      ]);
+      .complexFilter([
+`[0:a]volume=1.0[voice]`,
+`[1:a]volume=${MUSIC_VOLUME}[music]`,
+`[voice][music]amix=inputs=2:duration=first:dropout_transition=0[a]`
+])
+.outputOptions([
+"-map", "0:v:0",
+"-map", "[a]",
+"-c:v", "copy",
+"-c:a", "aac",
+"-b:a", "160k",
+"-ac", "2",
+"-ar", "44100",
+"-shortest",
+])
     attachLogging(cmd, "music", resolve, reject);
     cmd.save(outPath);
   });

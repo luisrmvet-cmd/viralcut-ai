@@ -114,18 +114,23 @@ function attachLogging(
   reject: (e: Error) => void
 ) {
   let startedCmd = "";
-  cmdObj
-    .on("start", (cmd: string) => {
-      startedCmd = cmd;
-      console.log(`[${tag}] ffmpeg:`, cmd);
-    })
-    .on("error", (err: Error, _stdout: string | null, stderr: string | null) => {
-      console.error(`[${tag}] FALHOU:`, err.message);
-      console.error(`[${tag}] comando:`, startedCmd);
-      console.error(`[${tag}] stderr:`, stderr || "(vazio)");
-      reject(err);
-    })
-    .on("end", () => resolve());
+let perfT0 = 0; // PR 10.1
+cmdObj
+.on("start", (cmd: string) => {
+startedCmd = cmd;
+perfT0 = Date.now(); // PR 10.1
+console.log(`[${tag}] ffmpeg:`, cmd);
+})
+.on("error", (err: Error, _stdout: string | null, stderr: string | null) => {
+console.error(`[${tag}] FALHOU:`, err.message);
+console.error(`[${tag}] comando:`, startedCmd);
+console.error(`[${tag}] stderr:`, stderr || "(vazio)");
+reject(err);
+})
+.on("end", () => {
+console.log(`[perf] ${tag}: ${Date.now() - perfT0}ms`); // PR 10.1
+resolve();
+});
 }
 
 /** Bakeia UM clipe de imagem (Ken Burns) em MP4 normalizado de `frames` quadros. */
@@ -419,7 +424,9 @@ export async function POST(req: NextRequest) {
 
     // 1) render principal: bake de cada clipe + concat demuxer
     const baseVideo = path.join(tmpDir, "video.mp4");
-    await renderVideo(baseVideo, clips, duration, smartEdit, tmpDir);
+    const tRender = Date.now(); // PR 10.1
+await renderVideo(baseVideo, clips, duration, smartEdit, tmpDir);
+console.log(`[perf] total-render: ${Date.now() - tRender}ms`); // PR 10.1
 
     // 2) legenda opcional (Fase 5)
     const caption = sanitizeCaption(String(form.get("caption") || ""));
@@ -471,10 +478,12 @@ await mixBackgroundMusic(videoForMusic, musicPath, withMusicPath);
     const videoBuffer = await readFile(deliverPath);
 
 try {
+  const tBlob = Date.now(); // PR 10.1
   const uploaded = await put(`renders/viralcut-${jobId}.mp4`, videoBuffer, {
     access: "public",
     contentType: "video/mp4",
   });
+  console.log(`[perf] blob-upload: ${Date.now() - tBlob}ms`); // PR 10.1
   return NextResponse.json({ ok: true, url: uploaded.url });
 } catch (e) {
   // Só local + sem token: não derruba o render. Caso contrário, mantém o comportamento atual.

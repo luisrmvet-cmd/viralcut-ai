@@ -6,7 +6,8 @@ import { upload } from "@vercel/blob/client"; // (Fase 8A.2) client upload p/ Ve
 // (1) NOVO: histórico
 import VideoHistory from "./components/VideoHistory";
 import SuccessScreen from "./components/SuccessScreen";
-
+import CaptionControls from "./components/CaptionControls";
+import type { CaptionStyle } from "./lib/captions";
 const DURATIONS = [15, 30, 45, 60] as const;
 type Duration = (typeof DURATIONS)[number];
 
@@ -154,11 +155,15 @@ export default function Home() {
   const [caption, setCaption] = useState<string>("");
   const [smartEdit, setSmartEdit] = useState(false);
   const [autoCut, setAutoCut] = useState(false); // (Fase 9) AutoCut AI — OFF por padrão
+    const [captionsEnabled, setCaptionsEnabled] = useState(false);
+  const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("classico");
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string>("");
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [historyKey, setHistoryKey] = useState(0);
+  // Legendas automáticas: nesta fase, apenas 15s e 30s.
+  const captionsAllowed = duration === 15 || duration === 30;
   function handleReset() {
 if (videoUrl) URL.revokeObjectURL(videoUrl);
 setVideoUrl(null);
@@ -285,7 +290,8 @@ fd.append("autoCut", "1");
 fd.append("autoCutSourceDuration", String(srcDur));
 }
 }
-
+fd.append("captions", captionsEnabled && captionsAllowed ? "1" : "0");
+fd.append("captionStyle", captionStyle);
       setStatus("Gerando vídeo...");
       const res = await fetch("/api/render", { method: "POST", body: fd });
       const data = await res.json().catch(() => null);
@@ -417,6 +423,14 @@ fd.append("autoCutSourceDuration", String(srcDur));
           disabled={loading}
           style={styles.captionInput}
         />
+        <CaptionControls
+enabled={captionsEnabled}
+onEnabledChange={setCaptionsEnabled}
+style={captionStyle}
+onStyleChange={setCaptionStyle}
+disabled={!captionsAllowed}
+disabledReason="Legendas automáticas disponíveis para 15s e 30s nesta fase."
+/>
         <p style={styles.fileHint}>
           {caption.length}/{MAX_CAPTION_LEN} — aparece na parte de baixo do vídeo
         </p>

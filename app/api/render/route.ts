@@ -17,6 +17,7 @@ import { DEFAULT_BPM } from "../../lib/smartEdit";
 import { NORMALIZE_VF_SDR, NORMALIZE_VF_HDR, isAllowedBlobUrl } from "../../lib/videoClip";
 import { transcribeWords } from "../../lib/transcribe";
 import { buildCaptionsAss, type CaptionStyle } from "../../lib/captions";
+import { planCut } from "../../lib/autocut";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -56,7 +57,12 @@ const CAPTION_FONT = path.join(process.cwd(), "assets", "fonts", "DejaVuSans-Bol
 const CAPTION_MAX_LEN = 120;
 const CAPTION_WRAP = 22;
 
-type Clip = { type: "image" | "video"; file: string; hdr?: boolean };
+type Clip = {
+type: "image" | "video";
+file: string;
+hdr?: boolean;
+start?: number; // offset em segundos na fonte (AutoCut)
+};
 
 /** (8A.2) Detecta HDR (HLG/PQ) pelo stderr do `ffmpeg -i` (sem precisar de ffprobe). */
 function probeIsHDR(srcPath: string): Promise<boolean> {
@@ -160,7 +166,8 @@ function bakeVideoClip(
   rawPath: string,
   outPath: string,
   frames: number,
-  hdr: boolean
+  hdr: boolean,
+  startSec = 0
 ): Promise<void> {
   const baseVf = hdr ? NORMALIZE_VF_HDR : NORMALIZE_VF_SDR;
   const vf =
@@ -168,7 +175,13 @@ function bakeVideoClip(
     `tpad=stop=-1:stop_mode=clone,trim=end_frame=${frames},` +
     `setpts=PTS-STARTPTS,format=yuv420p`;
   return new Promise((resolve, reject) => {
-    const cmd = ffmpeg(rawPath).outputOptions([
+    const cmd = ffmpeg(rawPath);
+
+if (startSec > 0) {
+cmd.inputOptions(["-ss", String(startSec)]);
+}
+
+cmd.outputOptions([
       "-map", "0:v:0",
     "-map", "0:a?",
 "-c:a", "aac",
@@ -185,6 +198,7 @@ function bakeVideoClip(
       "-color_primaries", "bt709",
       "-color_trc", "bt709",
       "-colorspace", "bt709",
+      "-shortest",
       "-movflags", "+faststart",
     ]);
     attachLogging(cmd, "bake-vid", resolve, reject);
@@ -274,11 +288,11 @@ async function renderVideo(
     const outClip = path.join(tmpDir, `clip${i}.mp4`);
     if (c.type === "video") {
       try {
-        await bakeVideoClip(c.file, outClip, frames[i], c.hdr === true);
+       await bakeVideoClip(c.file, outClip, frames[i], c.hdr === true, c.start ?? 0);
       } catch (e1) {
         if (c.hdr) {
           console.warn("[render] bake HDR falhou; tentando SDR simples:", e1);
-          await bakeVideoClip(c.file, outClip, frames[i], false);
+          await bakeVideoClip(c.file, outClip, frames[i], false, c.start ?? 0);
         } else {
           throw e1;
         }
@@ -394,6 +408,9 @@ export async function POST(req: NextRequest) {
 
   try {
     const form = await req.formData();
+    
+    const autoCutOn = form.get("autoCut") === "1";
+const autoCutSourceDuration = Number(form.get("autoCutSourceDuration") || 0);
 
     const imageFiles: File[] = [];
     for (const [key, value] of form.entries()) {
@@ -476,10 +493,21 @@ const captionsActive = captionsRequested && (duration === 15 || duration === 30)
       );
     }
 
-    // 1) render principal: bake de cada clipe + concat demuxer
-    const baseVideo = path.join(tmpDir, "video.mp4");
-    const tRender = Date.now(); // PR 10.1
-await renderVideo(baseVideo, clips, duration, smartEdit, tmpDir);
+    // AutoCut (Fase 9): expande 1 vídeo em N segmentos distribuídos
+let clipsForRender = clips;
+if (autoCutOn && autoCutSourceDuration > 0 && clips.length === 1 && clips[0].type === "video") {
+  const plan = planCut(autoCutSourceDuration, duration, 3);
+  const segs = Array.isArray(plan) ? plan : plan.segments;
+  if (segs && segs.length > 1) {
+    clipsForRender = segs.map((s) => ({ ...clips[0], start: s.start ?? s.offset }));
+    console.log(`[autocut] ${segs.length} segmentos planejados`);
+  }
+}
+
+// 1) render principal: bake de cada clipe + concat demuxer
+const baseVideo = path.join(tmpDir, "video.mp4");
+const tRender = Date.now(); // PR 10.1
+await renderVideo(baseVideo, clipsForRender, duration, smartEdit, tmpDir);
 console.log(`[perf] total-render: ${Date.now() - tRender}ms`); // PR 10.1
 
     // 2) legenda opcional (Fase 5)

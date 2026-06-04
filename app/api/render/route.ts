@@ -199,12 +199,9 @@ function concatClips(listPath: string, outPath: string): Promise<void> {
       .input(listPath)
       .inputOptions(["-f", "concat", "-safe", "0"])
       .outputOptions([
-        "-c:v", "libx264",
-        "-preset", "veryfast",
-        "-pix_fmt", "yuv420p",
-        "-r", String(FPS),
-        "-movflags", "+faststart",
-      ]);
+"-c", "copy",
+"-movflags", "+faststart",
+]);
     attachLogging(cmd, "concat", resolve, reject);
     cmd.save(outPath);
   });

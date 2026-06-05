@@ -167,13 +167,20 @@ function bakeVideoClip(
   outPath: string,
   frames: number,
   hdr: boolean,
-  startSec = 0
+  startSec = 0,
+  autoCutFade = false,
 ): Promise<void> {
   const baseVf = hdr ? NORMALIZE_VF_HDR : NORMALIZE_VF_SDR;
   const vf =
     `${baseVf},fps=${FPS},setpts=PTS-STARTPTS,` +
     `tpad=stop=-1:stop_mode=clone,trim=end_frame=${frames},` +
     `setpts=PTS-STARTPTS,format=yuv420p`;
+    // Fase 10 — AutoCut Pro Lite: fade visual leve, ativo só em clips do AutoCut.
+const FADE_N = 6; // frames por borda (~0.2s @ 30fps)
+const vfFinal =
+  autoCutFade && frames >= 30
+    ? `${vf},fade=t=in:s=0:n=${FADE_N},fade=t=out:s=${Math.max(0, frames - FADE_N)}:n=${FADE_N}`
+    : vf;
   return new Promise((resolve, reject) => {
     const cmd = ffmpeg(rawPath);
 
@@ -189,7 +196,7 @@ cmd.outputOptions([
 "-ac", "2",
 "-ar", "44100",
 "-sn", "-dn",
-      "-vf", vf,
+      "-vf", vfFinal,
       "-r", String(FPS),
       "-c:v", "libx264",
       "-preset", "veryfast",
@@ -288,11 +295,25 @@ async function renderVideo(
     const outClip = path.join(tmpDir, `clip${i}.mp4`);
     if (c.type === "video") {
       try {
-       await bakeVideoClip(c.file, outClip, frames[i], c.hdr === true, c.start ?? 0);
+      await bakeVideoClip(
+c.file,
+outClip,
+frames[i],
+c.hdr === true,
+c.start ?? 0,
+c.start !== undefined
+);
       } catch (e1) {
         if (c.hdr) {
           console.warn("[render] bake HDR falhou; tentando SDR simples:", e1);
-          await bakeVideoClip(c.file, outClip, frames[i], false, c.start ?? 0);
+         await bakeVideoClip(
+c.file,
+outClip,
+frames[i],
+false,
+c.start ?? 0,
+c.start !== undefined
+);
         } else {
           throw e1;
         }

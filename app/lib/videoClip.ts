@@ -11,7 +11,27 @@ export const NORMALIZE_VF_HDR =
   "tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p," +
   "scale=1080:1920:force_original_aspect_ratio=decrease," +
   "pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,setsar=1";
+// ---------- Fase 12 — Blur Fill (selecionado no route.ts via flag BLUR_FILL) ----------
+// Fundo = a própria mídia cobrindo 1080x1920, borrada e escurecida ~20%.
+// Cobertura calculada em baixa resolução (108x192) para custo mínimo de CPU.
+const BLUR_BG_SMALL = "108:192"; // resolução de trabalho do fundo
+const BLUR_SIGMA = 6;            // intensidade do gaussian blur
+const BLUR_DARKEN = 0.8;         // fator de escurecimento (~20%)
 
+const BLUR_FILL_CORE =
+  "split=2[bf_bg][bf_fg];" +
+  `[bf_bg]scale=${BLUR_BG_SMALL}:force_original_aspect_ratio=increase,` +
+  `crop=${BLUR_BG_SMALL},gblur=sigma=${BLUR_SIGMA},lutyuv=y=val*${BLUR_DARKEN},` +
+  "scale=1080:1920:flags=fast_bilinear[bf_bgout];" +
+  "[bf_fg]scale=1080:1920:force_original_aspect_ratio=decrease:force_divisible_by=2[bf_fgout];" +
+  "[bf_bgout][bf_fgout]overlay=(W-w)/2:(H-h)/2:format=yuv420,setsar=1";
+
+export const BLUR_FILL_VF_SDR = `format=yuv420p,${BLUR_FILL_CORE},format=yuv420p`;
+
+export const BLUR_FILL_VF_HDR =
+  "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709," +
+  "tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p," +
+  BLUR_FILL_CORE;
 /**
  * (Fix) Prep aplicado a TODO clipe (imagem OU vídeo) imediatamente antes do
  * xfade, garantindo que ambos os streams sejam IDÊNTICOS: mesmo SAR, fps,

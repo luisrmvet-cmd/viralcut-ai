@@ -14,7 +14,7 @@ import { FPS, clipChain, motionForIndex } from "../../lib/transitions";
 // (Fase 7) BPM da edição inteligente (cortes no ritmo)
 import { DEFAULT_BPM } from "../../lib/smartEdit";
 // (Fase 8A.2) normalização de vídeo + guarda anti-SSRF
-import { NORMALIZE_VF_SDR, NORMALIZE_VF_HDR, isAllowedBlobUrl } from "../../lib/videoClip";
+import { NORMALIZE_VF_SDR, NORMALIZE_VF_HDR, BLUR_FILL_VF_SDR, BLUR_FILL_VF_HDR, isAllowedBlobUrl } from "../../lib/videoClip";
 import { transcribeWords } from "../../lib/transcribe";
 import { buildCaptionsAss, type CaptionStyle } from "../../lib/captions";
 import { planCut, snapSegmentsToSilences } from "../../lib/autocut";
@@ -171,7 +171,12 @@ function bakeVideoClip(
   startSec = 0,
   autoCutFade = false,
 ): Promise<void> {
-  const baseVf = hdr ? NORMALIZE_VF_HDR : NORMALIZE_VF_SDR;
+// Fase 12 — Blur Fill: fundo borrado/escurecido no lugar da tarja preta.
+const blurFill = process.env.BLUR_FILL === "1";
+
+const baseVf = blurFill
+? (hdr ? BLUR_FILL_VF_HDR : BLUR_FILL_VF_SDR)
+: (hdr ? NORMALIZE_VF_HDR : NORMALIZE_VF_SDR);
   const vf =
     `${baseVf},fps=${FPS},setpts=PTS-STARTPTS,` +
     `tpad=stop=-1:stop_mode=clone,trim=end_frame=${frames},` +
@@ -209,8 +214,9 @@ cmd.outputOptions([
       "-shortest",
       "-movflags", "+faststart",
     ]);
-    attachLogging(cmd, "bake-vid", resolve, reject);
-    cmd.save(outPath);
+   console.log(`[blur-fill] ${blurFill ? "on" : "off"}`);
+attachLogging(cmd, "bake-vid", resolve, reject);
+cmd.save(outPath);
   });
 }
 

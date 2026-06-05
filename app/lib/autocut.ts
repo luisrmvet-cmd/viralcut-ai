@@ -116,15 +116,6 @@ function isValidSilence(s: unknown): s is SilenceInterval {
   );
 }
 
-/**
- * Ajusta os starts dos segmentos para pausas naturais (silêncios).
- * Pura: não executa FFmpeg, não toca disco, sem efeitos colaterais.
- *
- * @param segments       segmentos vindos de planCut() (não são mutados)
- * @param silences       intervalos de silêncio detectados na fonte
- * @param sourceDuration duração total do vídeo original, em segundos
- * @param options        maxShift (default 0.75s)
- */
 export function snapSegmentsToSilences(
   segments: CutSegment[],
   silences: SilenceInterval[],
@@ -152,40 +143,65 @@ export function snapSegmentsToSilences(
     .sort((a, b) => a - b);
   if (candidates.length < MIN_SILENCES_TO_SNAP) return original;
 
-  const used = new Set<number>(); // índice de candidato já consumido
+  // Distância de um instante até a pausa mais próxima (qualidade da borda).
+  const nearestDist = (t: number): number => {
+    let best = Infinity;
+    for (const m of candidates) {
+      const d = Math.abs(m - t);
+      if (d < best) best = d;
+    }
+    return best;
+  };
+
+  const EPS = 1e-9;
+  const used = new Set<number>(); // índice de candidato já consumido p/ alinhamento
+
+  // Soma das durações restantes a partir de cada índice (p/ teto de viabilidade).
+  const restAfter: number[] = new Array(original.length + 1).fill(0);
+  for (let i = original.length - 1; i >= 0; i--) {
+    restAfter[i] = restAfter[i + 1] + original[i].duration;
+  }
+
   const out: CutSegment[] = [];
 
   for (let i = 0; i < original.length; i++) {
     const seg = original[i];
-    const maxStart = sourceDuration - seg.duration;
+    const segEnd = seg.start + seg.duration;
+    // Teto de viabilidade: deixa espaço p/ TODOS os segmentos seguintes
+    // (garante que nenhum shift force sobreposição mais à frente).
+    const feasibleMax = sourceDuration - restAfter[i];
     const prevEnd = i > 0 ? out[i - 1].start + out[i - 1].duration : 0;
 
-    // Candidato mais próximo do start original, ainda livre.
+    // Candidato base: ficar parado (nunca piorar o plano V2).
+    let bestShift = 0;
+    let bestScore = nearestDist(seg.start) + nearestDist(segEnd);
     let bestIdx = -1;
-    let bestDist = Infinity;
+
     for (let c = 0; c < candidates.length; c++) {
       if (used.has(c)) continue;
-      const dist = Math.abs(candidates[c] - seg.start);
-      if (dist < bestDist) {
-        bestDist = dist;
-        bestIdx = c;
+      const m = candidates[c];
+      // Dois deslocamentos possíveis por pausa: alinhar o INÍCIO ou o FIM nela.
+      const shifts = [m - seg.start, m - segEnd];
+      for (const shift of shifts) {
+        if (Math.abs(shift) > maxShift) continue;
+        const newStart = seg.start + shift;
+        if (newStart < 0 || newStart > feasibleMax || newStart < prevEnd) continue;
+        const score = nearestDist(newStart) + nearestDist(newStart + seg.duration);
+        if (score < bestScore - EPS) {
+          bestScore = score;
+          bestShift = shift;
+          bestIdx = c;
+        }
       }
     }
 
-    let newStart = seg.start;
-    if (bestIdx >= 0 && bestDist <= maxShift) {
-      const snapped = Math.min(Math.max(0, candidates[bestIdx]), maxStart);
-      // Aceita só se preservar ordem e não sobrepor o segmento anterior.
-      if (snapped >= prevEnd) {
-        newStart = snapped;
-        used.add(bestIdx);
-      }
-    }
+    if (bestIdx >= 0) used.add(bestIdx);
+    let newStart = seg.start + bestShift;
 
-    // Trava final: start original também respeita os limites (defesa extra).
-    if (newStart < prevEnd || newStart > maxStart || newStart < 0) {
-      newStart = Math.min(Math.max(seg.start, 0), maxStart);
-    }
+    // Trava final: piso = fim do segmento anterior; teto = viabilidade dos
+    // próximos. Sempre satisfazível: o plano original do planCut cabe em
+    // sequência (espaçamento >= duração) e o teto reserva esse espaço.
+    newStart = Math.min(Math.max(newStart, prevEnd, 0), feasibleMax);
 
     out.push({
       start: Number(newStart.toFixed(3)),

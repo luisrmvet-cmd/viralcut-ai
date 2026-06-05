@@ -528,7 +528,7 @@ console.log("[autocut-snap] off (AUTOCUT_SNAP=0)");
 try {
 const tSnap = Date.now();
 const silences = await detectSilences(clips[0].file);
-const snapped = snapSegmentsToSilences(segs, silences, autoCutSourceDuration);
+const snapped = snapSegmentsToSilences(segs, silences, autoCutSourceDuration, { maxShift: 1.2 });
 const moved = snapped.filter((s, i) => s.start !== segs[i].start).length;
 console.log(
 `[autocut-snap] on silencios=${silences.length} movidos=${moved}/${segs.length} t=${Date.now() - tSnap}ms`

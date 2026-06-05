@@ -17,7 +17,8 @@ import { DEFAULT_BPM } from "../../lib/smartEdit";
 import { NORMALIZE_VF_SDR, NORMALIZE_VF_HDR, isAllowedBlobUrl } from "../../lib/videoClip";
 import { transcribeWords } from "../../lib/transcribe";
 import { buildCaptionsAss, type CaptionStyle } from "../../lib/captions";
-import { planCut } from "../../lib/autocut";
+import { planCut, snapSegmentsToSilences } from "../../lib/autocut";
+import { detectSilences } from "../../lib/silence";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -518,7 +519,26 @@ const captionsActive = captionsRequested && (duration === 15 || duration === 30)
 let clipsForRender = clips;
 if (autoCutOn && autoCutSourceDuration > 0 && clips.length === 1 && clips[0].type === "video") {
   const plan = planCut(autoCutSourceDuration, duration, 3);
-  const segs = Array.isArray(plan) ? plan : plan.segments;
+  let segs = Array.isArray(plan) ? plan : plan.segments;
+  // Fase 11A.1 — Snap por Silêncio (rollback: AUTOCUT_SNAP=0)
+const snapOn = process.env.AUTOCUT_SNAP !== "0";
+if (!snapOn) {
+console.log("[autocut-snap] off (AUTOCUT_SNAP=0)");
+} else if (segs && segs.length > 1) {
+try {
+const tSnap = Date.now();
+const silences = await detectSilences(clips[0].file);
+const snapped = snapSegmentsToSilences(segs, silences, autoCutSourceDuration);
+const moved = snapped.filter((s, i) => s.start !== segs[i].start).length;
+console.log(
+`[autocut-snap] on silencios=${silences.length} movidos=${moved}/${segs.length} t=${Date.now() - tSnap}ms`
+);
+segs = snapped;
+} catch (e) {
+console.log(`[autocut-snap] fallback V2: ${e instanceof Error ? e.message : String(e)}`);
+}
+}
+
   if (segs && segs.length > 1) {
     clipsForRender = segs.map((s) => ({ ...clips[0], start: s.start ?? s.offset }));
     console.log(`[autocut] ${segs.length} segmentos planejados`);

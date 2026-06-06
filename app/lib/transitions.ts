@@ -65,3 +65,107 @@ export function fadeChain(inLabel: string, totalSeconds: number, outLabel = "out
   const fd = fadeDuration(totalSeconds); const st = (totalSeconds - fd).toFixed(4);
   return `[${inLabel}]fade=t=in:st=0:d=${fd.toFixed(4)},fade=t=out:st=${st}:d=${fd.toFixed(4)}[${outLabel}]`;
 }
+
+/* ============================================================
+ * Fase 13A — Crossfade fixo 0.25s entre clipes (flag transitions)
+ * Bloco aditivo. Não altera nada da Fase 6 acima.
+ * ============================================================ */
+
+import { spawn as spawn13A } from "child_process";
+
+const FADE_13A = 0.25;
+
+function run13A(bin: string, args: string[], label: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const t0 = Date.now();
+    const proc = spawn13A(bin, args);
+    let err = "";
+    proc.stderr.on("data", (d) => (err += d.toString()));
+    proc.on("error", reject);
+    proc.on("close", (code) => {
+      console.log(`[perf] ${label}: ${Date.now() - t0}ms`);
+      if (code === 0) resolve();
+      else reject(new Error(`${label} exit ${code}: ${err.slice(-800)}`));
+    });
+  });
+}
+
+// Sondagem via `ffmpeg -i` (exit code != 0 é esperado; lemos o stderr).
+function probe13A(ffmpegBin: string, file: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn13A(ffmpegBin, ["-hide_banner", "-i", file]);
+    let err = "";
+    proc.stderr.on("data", (d) => (err += d.toString()));
+    proc.on("error", reject);
+    proc.on("close", () => resolve(err));
+  });
+}
+
+function parseDuration13A(stderr: string, file: string): number {
+  const m = stderr.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
+  if (!m) throw new Error(`13A: duração não encontrada em ${file}`);
+  const d = Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]);
+  if (!isFinite(d) || d <= 0) throw new Error(`13A: duração inválida em ${file}`);
+  return d;
+}
+
+export async function concatClipsWithCrossfade(
+  clipPaths: string[],
+  outPath: string,
+  tmpDir: string,
+  ffmpegBin: string
+): Promise<void> {
+  if (clipPaths.length < 2) {
+    throw new Error("13A: crossfade requer 2+ clipes"); // route.ts faz fallback
+  }
+
+  const durations: number[] = [];
+  for (const p of clipPaths) {
+    const info = await probe13A(ffmpegBin, p);
+    if (!/Stream #\d+:\d+.*Audio:/.test(info)) {
+      throw new Error(`13A: clipe sem trilha de áudio: ${p}`); // fallback
+    }
+    durations.push(parseDuration13A(info, p));
+  }
+
+  const parts: string[] = [];
+  for (let i = 0; i < clipPaths.length; i++) {
+    parts.push(`[${i}:v]settb=AVTB[v${i}]`);
+  }
+
+  let vPrev = "v0";
+  let aPrev = "0:a";
+  let cumulative = durations[0];
+
+  for (let i = 1; i < clipPaths.length; i++) {
+    const offset = Math.max(0, cumulative - FADE_13A).toFixed(3);
+    parts.push(
+      `[${vPrev}][v${i}]xfade=transition=fade:duration=${FADE_13A}:offset=${offset}[vx${i}]`
+    );
+    parts.push(`[${aPrev}][${i}:a]acrossfade=d=${FADE_13A}[ax${i}]`);
+    vPrev = `vx${i}`;
+    aPrev = `ax${i}`;
+    cumulative += durations[i] - FADE_13A;
+  }
+
+  parts.push(`[${vPrev}]format=yuv420p[vout]`);
+
+  const args: string[] = [];
+  for (const p of clipPaths) args.push("-i", p);
+  args.push(
+    "-filter_complex", parts.join(";"),
+    "-map", "[vout]",
+    "-map", `[${aPrev}]`,
+    "-c:v", "libx264",
+    "-preset", "ultrafast",
+    "-crf", "23",
+    "-r", String(FPS),
+    "-c:a", "aac",
+    "-b:a", "128k",
+    "-movflags", "+faststart",
+    "-y",
+    outPath
+  );
+
+  await run13A(ffmpegBin, args, `crossfade-concat(${clipPaths.length} clipes)`);
+}

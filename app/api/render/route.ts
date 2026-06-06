@@ -10,7 +10,11 @@ import ffmpeg from "fluent-ffmpeg";
 import ffmpegStatic from "ffmpeg-static";
 import { del, put } from "@vercel/blob";
 // (Fase 6) Ken Burns/zoom/pan por imagem
-import { FPS, clipChain, motionForIndex } from "../../lib/transitions";
+import {
+FPS,
+clipChain,
+motionForIndex,
+} from "../../lib/transitions";
 // (Fase 7) BPM da edição inteligente (cortes no ritmo)
 import { DEFAULT_BPM } from "../../lib/smartEdit";
 // (Fase 8A.2) normalização de vídeo + guarda anti-SSRF
@@ -183,11 +187,20 @@ const baseVf = blurFill
     `setpts=PTS-STARTPTS,format=yuv420p`;
     // Fase 10 — AutoCut Pro Lite: fade visual leve, ativo só em clips do AutoCut.
 const FADE_N = 6; // frames por borda (~0.2s @ 30fps)
-const vfFinal =
+
+    const vfFinal =
   autoCutFade && frames >= 30
     ? `${vf},fade=t=in:s=0:n=${FADE_N},fade=t=out:s=${Math.max(0, frames - FADE_N)}:n=${FADE_N}`
     : vf;
+// 13B — micro fade de áudio nas bordas do clipe (flag por env, default OFF)
+const FADE_S_13B = 0.04; // 40ms
+const clipSec13B = frames / FPS;
+const audioFade13B =
+  process.env.TRANSITIONS_AUDIO_FADE === "1" && clipSec13B > FADE_S_13B * 2
+    ? `afade=t=in:st=0:d=${FADE_S_13B},afade=t=out:st=${(clipSec13B - FADE_S_13B).toFixed(3)}:d=${FADE_S_13B}`
+    : null;
   return new Promise((resolve, reject) => {
+  
     const cmd = ffmpeg(rawPath);
 
 if (startSec > 0) {
@@ -201,6 +214,7 @@ cmd.outputOptions([
 "-b:a", "160k",
 "-ac", "2",
 "-ar", "44100",
+...(audioFade13B ? ["-af", audioFade13B] : []),
 "-sn", "-dn",
       "-vf", vfFinal,
       "-r", String(FPS),
@@ -292,7 +306,8 @@ async function renderVideo(
   clips: Clip[],
   totalSeconds: number,
   smartEdit: boolean,
-  tmpDir: string
+  tmpDir: string,
+  transitions0n: boolean = false
 ): Promise<void> {
   const frames = slotFrames(totalSeconds, clips.length, smartEdit);
   const clipPaths: string[] = [];
@@ -338,7 +353,7 @@ c.start !== undefined
     clipPaths.map((p) => `file '${p}'`).join("\n") + "\n",
     "utf8"
   );
-  await concatClips(listPath, outputPath);
+ await concatClips(listPath, outputPath);
 }
 
 // === Fase 5: legenda (drawtext) ===
@@ -438,6 +453,7 @@ export async function POST(req: NextRequest) {
     const form = await req.formData();
     
     const autoCutOn = form.get("autoCut") === "1";
+    
 const autoCutSourceDuration = Number(form.get("autoCutSourceDuration") || 0);
 
     const imageFiles: File[] = [];

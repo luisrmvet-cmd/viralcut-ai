@@ -253,7 +253,9 @@ function concatClips(listPath: string, outPath: string): Promise<void> {
 
 // ffmpeg filtergraph: escapa barras e dois-pontos (necessário no Windows local)
 function escapeFilterPath(p: string): string {
-  return p.replace(/\\/g, "/").replace(/:/g, "\\:");
+return p
+.replace(/\\/g, "/")
+.replace(/:/g, "\\\\:");
 }
 
 function extractAudioForCaptions(videoPath: string, outPath: string): Promise<void> {

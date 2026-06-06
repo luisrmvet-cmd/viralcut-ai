@@ -73,11 +73,11 @@ const STYLE_PRESETS: Record<CaptionStyle, StylePreset> = {
     outline: "&H00000000",
     back: "&H00000000",
     borderStyle: 1,
-    outlineMul: 0.004,
-    shadow: 0,
+   outlineMul: 0.005,
+    shadow: 1,
     alignment: 2,
-    fontMul: 0.052,
-    marginVMul: 0.22,
+    fontMul: 0.058,
+    marginVMul: 0.26,
   },
   karaoke: {
     primary: "&H0000FFFF",
@@ -98,8 +98,8 @@ const STYLE_PRESETS: Record<CaptionStyle, StylePreset> = {
     outlineMul: 0.006,
     shadow: 0,
     alignment: 5,
-    fontMul: 0.05,
-    marginVMul: 0,
+    fontMul: 0.055,
+    marginVMul: 0.05,
   },
 };
 

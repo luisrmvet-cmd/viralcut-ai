@@ -25,9 +25,16 @@ export type DetectSilenceOptions = {
   ffmpegPath?: string;  // default: binário do ffmpeg-static (já no projeto)
 };
 
-const DEFAULT_NOISE_DB = -35;
-const DEFAULT_MIN_SILENCE = 0.3;
-const DEFAULT_TIMEOUT_MS = 20_000;
+// Fase 14B.1.1 — calibração de detecção de pausas (override por env)
+// Rollback sem código: AUTOCUT_SILENCE_NOISE=-35 e AUTOCUT_SILENCE_MIN=0.3
+function envNum(name: string, fallback: number): number {
+  const v = Number(process.env[name]);
+  return Number.isFinite(v) ? v : fallback;
+}
+
+const DEFAULT_NOISE_DB = envNum("AUTOCUT_SILENCE_NOISE", -25);
+const DEFAULT_MIN_SILENCE = envNum("AUTOCUT_SILENCE_MIN", 0.25);
+const DEFAULT_TIMEOUT_MS = 20000;
 
 const RE_SILENCE_START = /silence_start:\s*(-?\d+(?:\.\d+)?)/g;
 const RE_SILENCE_END = /silence_end:\s*(-?\d+(?:\.\d+)?)/g;

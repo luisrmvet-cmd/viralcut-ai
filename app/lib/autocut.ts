@@ -211,3 +211,91 @@ export function snapSegmentsToSilences(
 
   return out;
 }
+
+/* ------------------------------------------------------------------ */
+/* Fase 14B.1.1 — Speech Guard (alinhamento de FIM em pausas)         */
+/* ------------------------------------------------------------------ */
+//
+// Camada PURA pós-snap. Desloca cada segmento RIGIDAMENTE (duration
+// intacta) para que o FIM caia na pausa de fala mais próxima, com
+// preferência por deslocar PARA FRENTE (completa a palavra/frase:
+// "Essa doença cu…" → "Essa doença custa."). Mesmas garantias da 11A.1:
+//   - mesmo número de segmentos, mesmas durations (frames intocados);
+//   - start ∈ [0, sourceDuration - duration], sem sobreposição;
+//   - entrada inválida ou sem pausas úteis → cópia idêntica (fallback).
+
+export type SpeechGuardOptions = { maxShift?: number };
+
+const GUARD_DEFAULT_MAX_SHIFT = 0.9; // janela de busca por pausa (s)
+const GUARD_ALREADY_OK = 0.15;       // fim a <=150ms de uma pausa → não mexe
+
+export function alignSegmentEndsToSilences(
+  segments: CutSegment[],
+  silences: SilenceInterval[],
+  sourceDuration: number,
+  options: SpeechGuardOptions = {}
+): CutSegment[] {
+  const original = Array.isArray(segments)
+    ? segments.map((s) => ({ start: s.start, duration: s.duration }))
+    : [];
+  if (original.length < 1) return original;
+  if (!isValidNumber(sourceDuration)) return original;
+
+  const maxShift =
+    isValidNumber(options.maxShift ?? NaN) ? (options.maxShift as number) : GUARD_DEFAULT_MAX_SHIFT;
+
+  const valid = Array.isArray(silences) ? silences.filter(isValidSilence) : [];
+  const candidates = valid
+    .map((s) => (s.start + s.end) / 2)
+    .filter((m) => m > 0 && m < sourceDuration)
+    .sort((a, b) => a - b);
+  if (candidates.length === 0) return original;
+
+  // Soma das durações restantes (teto de viabilidade, igual à 11A.1).
+  const restAfter: number[] = new Array(original.length + 1).fill(0);
+  for (let i = original.length - 1; i >= 0; i--) {
+    restAfter[i] = restAfter[i + 1] + original[i].duration;
+  }
+
+  const out: CutSegment[] = [];
+
+  for (let i = 0; i < original.length; i++) {
+    const seg = original[i];
+    const segEnd = seg.start + seg.duration;
+    const feasibleMax = sourceDuration - restAfter[i];
+    const prevEnd = i > 0 ? out[i - 1].start + out[i - 1].duration : 0;
+
+    let bestShift = 0;
+
+    // Fim já está praticamente numa pausa? Não mexe.
+    let nearest = Infinity;
+    for (const m of candidates) nearest = Math.min(nearest, Math.abs(m - segEnd));
+
+    if (nearest > GUARD_ALREADY_OK) {
+      // 1ª escolha: menor deslocamento PARA FRENTE (completa a frase).
+      // 2ª escolha: menor deslocamento para trás.
+      let fwd = Infinity;
+      let bwd = -Infinity;
+      for (const m of candidates) {
+        const shift = m - segEnd;
+        if (Math.abs(shift) > maxShift) continue;
+        const newStart = seg.start + shift;
+        if (newStart < 0 || newStart > feasibleMax || newStart < prevEnd) continue;
+        if (shift >= 0 && shift < fwd) fwd = shift;
+        if (shift < 0 && shift > bwd) bwd = shift;
+      }
+      if (fwd !== Infinity) bestShift = fwd;
+      else if (bwd !== -Infinity) bestShift = bwd;
+    }
+
+    let newStart = seg.start + bestShift;
+    newStart = Math.min(Math.max(newStart, prevEnd, 0), feasibleMax);
+
+    out.push({
+      start: Number(newStart.toFixed(3)),
+      duration: seg.duration, // intacta → frames/slotFrames/FFmpeg intocados
+    });
+  }
+
+  return out;
+}

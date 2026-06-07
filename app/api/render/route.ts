@@ -21,7 +21,7 @@ import { DEFAULT_BPM } from "../../lib/smartEdit";
 import { NORMALIZE_VF_SDR, NORMALIZE_VF_HDR, BLUR_FILL_VF_SDR, BLUR_FILL_VF_HDR, isAllowedBlobUrl } from "../../lib/videoClip";
 import { transcribeWords } from "../../lib/transcribe";
 import { buildCaptionsAss, type CaptionStyle } from "../../lib/captions";
-import { planCut, snapSegmentsToSilences } from "../../lib/autocut";
+import { planCut, snapSegmentsToSilences, alignSegmentEndsToSilences } from "../../lib/autocut";
 import { detectSilences } from "../../lib/silence";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -251,11 +251,14 @@ function concatClips(listPath: string, outPath: string): Promise<void> {
 
 // ---------- Legendas automáticas (Fase 11A) ----------
 
-// ffmpeg filtergraph: escapa barras e dois-pontos (necessário no Windows local)
 function escapeFilterPath(p: string): string {
-return p
-.replace(/\\/g, "/")
-.replace(/:/g, "\\\\:");
+  // Fase 14B.1.1-fix — Windows: o ':' de "C:" quebra o parser do filtro
+  // subtitles (vira separador de opções → erro 'original_size').
+  // 1) barras invertidas → barras normais (válido no FFmpeg em Windows);
+  // 2) ':' escapado em DOIS níveis (filtergraph + opções do filtro).
+  return p
+    .replace(/\\/g, "/")
+    .replace(/:/g, "\\\\:");
 }
 
 function extractAudioForCaptions(videoPath: string, outPath: string): Promise<void> {
@@ -558,6 +561,17 @@ console.log(
 `[autocut-snap] on silencios=${silences.length} movidos=${moved}/${segs.length} t=${Date.now() - tSnap}ms`
 );
 segs = snapped;
+
+// Fase 14B.1.1 — Speech Guard (rollback: AUTOCUT_SPEECH_GUARD=0)
+const guardOn = process.env.AUTOCUT_SPEECH_GUARD !== "0";
+if (guardOn) {
+  const guarded = alignSegmentEndsToSilences(segs, silences, autoCutSourceDuration, { maxShift: 0.9 });
+  const ajustados = guarded.filter((s, idx) => s.start !== segs[idx].start).length;
+  console.log(`[speech-guard] on ajustados=${ajustados}/${segs.length}`);
+  segs = guarded;
+} else {
+  console.log("[speech-guard] off (AUTOCUT_SPEECH_GUARD=0)");
+}
 } catch (e) {
 console.log(`[autocut-snap] fallback V2: ${e instanceof Error ? e.message : String(e)}`);
 }

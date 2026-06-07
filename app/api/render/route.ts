@@ -22,6 +22,7 @@ import { NORMALIZE_VF_SDR, NORMALIZE_VF_HDR, BLUR_FILL_VF_SDR, BLUR_FILL_VF_HDR,
 import { transcribeWords } from "../../lib/transcribe";
 import { buildCaptionsAss, type CaptionStyle } from "../../lib/captions";
 import { planCut, snapSegmentsToSilences, alignSegmentEndsToSilences } from "../../lib/autocut";
+import { rankCandidates } from "../../lib/viralscore";
 import { detectSilences } from "../../lib/silence";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -546,8 +547,35 @@ const captionsActive = captionsRequested && (duration === 15 || duration === 30)
 let clipsForRender = clips;
 if (autoCutOn && autoCutSourceDuration > 0 && clips.length === 1 && clips[0].type === "video") {
   const plan = planCut(autoCutSourceDuration, duration, 3);
-  let segs = Array.isArray(plan) ? plan : plan.segments;
+  
+    let segs = Array.isArray(plan) ? plan : plan.segments;
+
+  // Fase 15A — Viral Score (ativar: VIRAL_SCORE=1; default OFF)
+  const viralOn = process.env.VIRAL_SCORE === "1";
+  if (viralOn && segs && segs.length > 1) {
+    try {
+      const tVs = Date.now();
+      const vsAudioPath = path.join(tmpDir, "viralscore-audio.m4a");
+      await extractAudioForCaptions(clips[0].file, vsAudioPath);
+      const vsWords = await transcribeWords(vsAudioPath, { language: "pt" });
+      if (vsWords.length > 0) {
+        const ranked = rankCandidates(vsWords, autoCutSourceDuration, segs);
+        console.log(
+          `[viral-score] on palavras=${vsWords.length} segmentos=${ranked.length} t=${Date.now() - tVs}ms`
+        );
+        segs = ranked;
+      } else {
+        console.log("[viral-score] 0 palavras; mantendo plano V2");
+      }
+    } catch (e) {
+      console.log(`[viral-score] fallback V2: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  } else if (!viralOn) {
+    console.log("[viral-score] off (VIRAL_SCORE!=1)");
+  }
+
   // Fase 11A.1 — Snap por Silêncio (rollback: AUTOCUT_SNAP=0)
+ 
 const snapOn = process.env.AUTOCUT_SNAP !== "0";
 if (!snapOn) {
 console.log("[autocut-snap] off (AUTOCUT_SNAP=0)");

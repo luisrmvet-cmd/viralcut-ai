@@ -4,6 +4,7 @@
 // para queima posterior via filtro `subtitles` do FFmpeg (libass).
 // Não faz I/O, não chama FFmpeg e não acessa a rede.
 
+import { markHighlights } from "./highlight";
 export type CaptionStyle = "classico" | "karaoke" | "boxed";
 
 export interface WordTiming {
@@ -145,11 +146,15 @@ function buildEvents(words: WordTiming[]): string[] {
 
   const lines: string[] = [];
   const n = words.length;
+  const flags = markHighlights(words.map((x) => x.word));
 
   for (let i = 0; i < n; i++) {
     const w = words[i];
     const text = sanitize(w.word);
     if (!text) continue;
+    const finalText = flags[i]
+      ? `{\\b1\\c&H00FFFF&}${text}{\\r}`
+      : text;
 
     const start = Math.max(0, w.start);
     let end: number;
@@ -166,7 +171,7 @@ function buildEvents(words: WordTiming[]): string[] {
     if (end <= start) continue;
 
     lines.push(
-      `Dialogue: 0,${toAssTime(start)},${toAssTime(end)},Caption,,0,0,0,,${text}`
+      `Dialogue: 0,${toAssTime(start)},${toAssTime(end)},Caption,,0,0,0,,${finalText}`
     );
   }
 

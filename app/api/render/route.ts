@@ -27,6 +27,9 @@ import { detectSilences } from "../../lib/silence";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
+function perfMs(label: string, start: number) {
+console.log(`[perf] ${label}: ${Date.now() - start}ms`);
+}
 
 if (ffmpegStatic) {
   ffmpeg.setFfmpegPath(ffmpegStatic as unknown as string);
@@ -72,14 +75,22 @@ start?: number; // offset em segundos na fonte (AutoCut)
 
 /** (8A.2) Detecta HDR (HLG/PQ) pelo stderr do `ffmpeg -i` (sem precisar de ffprobe). */
 function probeIsHDR(srcPath: string): Promise<boolean> {
+  const t0 = Date.now();
   return new Promise((resolve) => {
     const bin = ffmpegStatic as unknown as string;
     if (!bin) return resolve(false);
     let err = "";
     const p = spawn(bin, ["-hide_banner", "-i", srcPath]);
     p.stderr.on("data", (d) => (err += d.toString()));
-    p.on("close", () => resolve(/smpte2084|arib-std-b67|bt2020/i.test(err)));
-    p.on("error", () => resolve(false));
+    p.on("close", () => {
+perfMs("probeIsHDR", t0);
+resolve(/smpte2084|arib-std-b67|bt2020/i.test(err));
+});
+
+    p.on("error", () => {
+perfMs("probeIsHDR", t0);
+resolve(false);
+});
   });
 }
 
@@ -154,7 +165,7 @@ function bakeImageClip(
   frames: number
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const cmd = ffmpeg(imgPath)
+       const cmd = ffmpeg(imgPath)
       .complexFilter(clipChain(0, "v", effect, frames))
       .outputOptions(["-map", "[v]", ...CLIP_ENC]);
     attachLogging(cmd, "bake-img", resolve, reject);
@@ -176,6 +187,7 @@ function bakeVideoClip(
   startSec = 0,
   autoCutFade = false,
 ): Promise<void> {
+  const t0 = Date.now();
 // Fase 12 — Blur Fill: fundo borrado/escurecido no lugar da tarja preta.
 const blurFill = process.env.BLUR_FILL === "1";
 
@@ -230,7 +242,15 @@ cmd.outputOptions([
       "-movflags", "+faststart",
     ]);
    console.log(`[blur-fill] ${blurFill ? "on" : "off"}`);
-attachLogging(cmd, "bake-vid", resolve, reject);
+attachLogging(
+cmd,
+"bake-vid",
+() => {
+perfMs("bakeVideoClip", t0);
+resolve();
+},
+reject
+);
 cmd.save(outPath);
   });
 }
@@ -317,7 +337,11 @@ async function renderVideo(
 ): Promise<void> {
   const frames = slotFrames(totalSeconds, clips.length, smartEdit);
   const clipPaths: string[] = [];
+const tClips = Date.now();
 
+console.log(
+`[perf] clips=${clips.length} frames=${frames.join(",")}`
+);
   for (let i = 0; i < clips.length; i++) {
     const c = clips[i];
     const outClip = path.join(tmpDir, `clip${i}.mp4`);
@@ -351,7 +375,9 @@ c.start !== undefined
     }
     clipPaths.push(outClip);
   }
-
+console.log(
+`[perf] clips-loop: ${Date.now() - tClips}ms`
+);
   // concat demuxer
   const listPath = path.join(tmpDir, "concat.txt");
   await writeFile(
@@ -546,7 +572,7 @@ const captionsActive = captionsRequested && (duration === 15 || duration === 30)
     // AutoCut (Fase 9): expande 1 vídeo em N segmentos distribuídos
 let clipsForRender = clips;
 if (autoCutOn && autoCutSourceDuration > 0 && clips.length === 1 && clips[0].type === "video") {
-  const plan = planCut(autoCutSourceDuration, duration, 3);
+  const plan = planCut(autoCutSourceDuration, duration, 5);
   
     let segs = Array.isArray(plan) ? plan : plan.segments;
 

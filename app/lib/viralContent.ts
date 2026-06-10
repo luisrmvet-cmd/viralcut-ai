@@ -16,6 +16,8 @@ angulo: string;
 triggerType: string;
 emotion: string;
 intensity: string;
+viralityLevel: string;
+
 hooks: string[];
 
 titulosInstagram: string[];
@@ -244,6 +246,7 @@ angulo?: unknown;
 triggerType?: unknown;
 emotion?: unknown;
 intensity?: unknown;
+viralityLevel?: unknown
 hooks?: unknown;
 
 titulosInstagram?: unknown;
@@ -267,6 +270,11 @@ typeof o.triggerType === "string"
 const emotion =
 typeof o.emotion === "string"
 ? o.emotion.trim()
+: "";
+
+const viralityLevel =
+typeof o.viralityLevel === "string"
+? o.viralityLevel.trim()
 : "";
 
 const intensity =
@@ -302,6 +310,7 @@ titulosShorts.length === 0
 angulo,
 triggerType,
 emotion,
+viralityLevel,
 intensity,
 hooks: hooks.slice(0, 5),
 

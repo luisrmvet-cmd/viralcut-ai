@@ -32,6 +32,9 @@ ctaCompartilhamento: string;
 ctaSeguidores: string;
 
 hashtags: string[];
+coverTitle: string;
+coverSubtitle: string;
+coverStyle: string;
 }
 
 
@@ -268,6 +271,10 @@ ctaCompartilhamento?: unknown;
 ctaSeguidores?: unknown;
 
 hashtags?: unknown;
+
+coverTitle?: unknown;
+coverSubtitle?: unknown;
+coverStyle?: unknown;
 };
 const angulo = typeof o.angulo === "string" ? o.angulo.trim() : "curiosidade";
 const triggerType =
@@ -340,6 +347,20 @@ ctaCompartilhamento,
 ctaSeguidores,
 
 hashtags: hashtags.slice(0, 5),
+coverTitle:
+typeof o.coverTitle === "string"
+? o.coverTitle.trim()
+: "",
+
+coverSubtitle:
+typeof o.coverSubtitle === "string"
+? o.coverSubtitle.trim()
+: "",
+
+coverStyle:
+typeof o.coverStyle === "string"
+? o.coverStyle.trim()
+: "",
 };
 
 }

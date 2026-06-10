@@ -15,7 +15,7 @@ export interface ViralContent {
 angulo: string;
 triggerType: string;
 emotion: string;
-
+intensity: string;
 hooks: string[];
 
 titulosInstagram: string[];
@@ -243,6 +243,7 @@ function parseViralContent(raw: string): ViralContent {
 angulo?: unknown;
 triggerType?: unknown;
 emotion?: unknown;
+intensity?: unknown;
 hooks?: unknown;
 
 titulosInstagram?: unknown;
@@ -267,6 +268,12 @@ const emotion =
 typeof o.emotion === "string"
 ? o.emotion.trim()
 : "";
+
+const intensity =
+typeof o.intensity === "string"
+? o.intensity.trim()
+: "";
+
   const hooks = toStringList(o.hooks);
 
 const titulosInstagram = toStringList(o.titulosInstagram);
@@ -295,6 +302,7 @@ titulosShorts.length === 0
 angulo,
 triggerType,
 emotion,
+intensity,
 hooks: hooks.slice(0, 5),
 
 titulosInstagram: titulosInstagram.slice(0, 5),

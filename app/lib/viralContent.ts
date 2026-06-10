@@ -167,7 +167,7 @@ export async function generateViralContent(
   const text = (transcript || "").trim();
   if (!text) throw new Error("Transcrição vazia.");
 
-  const model = options.model ?? "llama-3.3-70b-versatile";
+  const model = options.model ?? "llama-3.1-8b-instant";
   const apiKey = options.apiKey ?? process.env.GROQ_API_KEY;
   const baseUrl = options.baseUrl ?? "https://api.groq.com/openai/v1";
   const timeoutMs = options.timeoutMs ?? 30000;

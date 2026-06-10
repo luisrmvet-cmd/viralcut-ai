@@ -7,6 +7,7 @@ import { upload } from "@vercel/blob/client"; // (Fase 8A.2) client upload p/ Ve
 import VideoHistory from "./components/VideoHistory";
 import SuccessScreen from "./components/SuccessScreen";
 import CaptionControls from "./components/CaptionControls";
+import ViralContentPanel from "./components/ViralContentPanel";
 import type { CaptionStyle } from "./lib/captions";
 const DURATIONS = [15, 30, 45, 60] as const;
 type Duration = (typeof DURATIONS)[number];
@@ -468,9 +469,13 @@ disabledReason="Legendas automáticas disponíveis para 15s e 30s nesta fase."
 
         {error && <p style={styles.error}>{error}</p>}
 
-        {videoUrl && <SuccessScreen videoUrl={videoUrl} onReset={handleReset} />}
+       {videoUrl && <SuccessScreen videoUrl={videoUrl} onReset={handleReset} />}
 
-        <VideoHistory refreshKey={historyKey} />
+{process.env.NEXT_PUBLIC_VIRAL_CONTENT_AI === "1" && videoItems[0]?.file && (
+<ViralContentPanel videoFile={videoItems[0].file} />
+)}
+
+<VideoHistory refreshKey={historyKey} />
       </div>
     </main>
   );

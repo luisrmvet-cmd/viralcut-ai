@@ -66,6 +66,8 @@ Prioridades, nesta ordem:
 8. Não use aberturas genéricas.
 9. Se houver risco, erro ou consequência grave, priorize esse elemento.
 10. O objetivo principal é fazer a pessoa continuar assistindo após os primeiros 3 segundos.
+11. Identifique qual gatilho emocional é dominante no conteúdo.
+12. Classifique a intensidade do gatilho como baixa, média ou alta.
 Regras dos hooks:
 
 - Curtos, lidos em até 3 segundos.
@@ -78,6 +80,9 @@ Regras dos hooks:
 - Evite "ninguém te conta", "você não vai acreditar", "veja isso", "olha isso" e frases batidas.
 - Varie o estilo entre pergunta, alerta, afirmação e curiosidade.
 - Os hooks devem parecer escritos por um criador humano brasileiro.
+- Determine qual emoção domina o vídeo.
+- Determine qual gatilho emocional domina o vídeo.
+- Classifique o potencial de viralização em baixo, médio ou alto.
 Estratégias preferidas para hooks:
 - Surpresa.
 - Quebra de expectativa.

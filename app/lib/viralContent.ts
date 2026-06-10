@@ -13,6 +13,8 @@
 
 export interface ViralContent {
 angulo: string;
+triggerType: string;
+emotion: string;
 
 hooks: string[];
 
@@ -239,6 +241,8 @@ function parseViralContent(raw: string): ViralContent {
   }
   const o = obj as {
 angulo?: unknown;
+triggerType?: unknown;
+emotion?: unknown;
 hooks?: unknown;
 
 titulosInstagram?: unknown;
@@ -254,6 +258,15 @@ ctaSeguidores?: unknown;
 hashtags?: unknown;
 };
 const angulo = typeof o.angulo === "string" ? o.angulo.trim() : "curiosidade";
+const triggerType =
+typeof o.triggerType === "string"
+? o.triggerType.trim()
+: "";
+
+const emotion =
+typeof o.emotion === "string"
+? o.emotion.trim()
+: "";
   const hooks = toStringList(o.hooks);
 
 const titulosInstagram = toStringList(o.titulosInstagram);
@@ -280,6 +293,8 @@ titulosShorts.length === 0
   }
  return {
 angulo,
+triggerType,
+emotion,
 hooks: hooks.slice(0, 5),
 
 titulosInstagram: titulosInstagram.slice(0, 5),

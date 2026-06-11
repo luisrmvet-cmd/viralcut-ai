@@ -238,9 +238,7 @@ window.scrollTo({ top: 0, behavior: "smooth" });
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     setVideoUrl(null);
 
-    setViralAI(null);
-
-    if (files.length === 0 && videoItems.length === 0) {
+        if (files.length === 0 && videoItems.length === 0) {
       setError("Selecione pelo menos uma imagem ou vídeo.");
       return;
     }

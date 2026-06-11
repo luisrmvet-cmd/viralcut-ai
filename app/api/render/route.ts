@@ -24,6 +24,8 @@ import { buildCaptionsAss, type CaptionStyle } from "../../lib/captions";
 import { planCut, snapSegmentsToSilences, alignSegmentEndsToSilences } from "../../lib/autocut";
 import { rankCandidates } from "../../lib/viralscore";
 import { detectSilences } from "../../lib/silence";
+import { buildVideoOverlayAI } from "../../lib/videoOverlayAI";
+
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -485,6 +487,15 @@ export async function POST(req: NextRequest) {
     const form = await req.formData();
     
     const autoCutOn = form.get("autoCut") === "1";
+
+    const overlayAI = buildVideoOverlayAI(
+String(form.get("aiHook") || ""),
+String(form.get("aiStyle") || ""),
+String(form.get("aiSubtitle") || ""),
+String(form.get("aiCTA") || "")
+);
+
+console.log("[overlayAI]", overlayAI);
     
 const autoCutSourceDuration = Number(form.get("autoCutSourceDuration") || 0);
 

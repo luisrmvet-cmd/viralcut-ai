@@ -163,6 +163,7 @@ export default function Home() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [historyKey, setHistoryKey] = useState(0);
+  const [viralAI, setViralAI] = useState<any>(null);
   // Legendas automáticas: nesta fase, apenas 15s e 30s.
   const captionsAllowed = duration === 15 || duration === 30;
   function handleReset() {
@@ -172,6 +173,7 @@ setFiles([]);
 setVideoItems([]);
 setError(null);
 setStatus("");
+setViralAI(null);
 window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -236,6 +238,8 @@ window.scrollTo({ top: 0, behavior: "smooth" });
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     setVideoUrl(null);
 
+    setViralAI(null);
+
     if (files.length === 0 && videoItems.length === 0) {
       setError("Selecione pelo menos uma imagem ou vídeo.");
       return;
@@ -283,9 +287,17 @@ window.scrollTo({ top: 0, behavior: "smooth" });
       }
       if (caption.trim()) fd.append("caption", caption.trim());
       if (smartEdit) fd.append("smartEdit", "1");
-      
+
       if (process.env.NEXT_PUBLIC_VIRAL_CONTENT_AI === "1")
-fd.append("overlayAI", "1");
+        fd.append("overlayAI", "1");
+if (viralAI) {
+const firstHook = Array.isArray(viralAI.hooks) ? viralAI.hooks[0] : "";
+fd.append("aiHook", firstHook || "");
+fd.append("aiStyle", viralAI.coverStyle || viralAI.angulo || "");
+fd.append("aiSubtitle", viralAI.legenda || viralAI.coverSubtitle || "");
+fd.append("aiCTA", viralAI.ctaSeguidores || viralAI.ctaComentarios || "");
+}
+
       // (Fase 9) AutoCut: só com 1 vídeo e 0 imagens; manda flag + duração.
 if (autoCut && files.length === 0 && videoItems.length === 1) {
 const srcDur = await getVideoDurationSec(videoItems[0].file);
@@ -475,7 +487,11 @@ disabledReason="Legendas automáticas disponíveis para 15s e 30s nesta fase."
        {videoUrl && <SuccessScreen videoUrl={videoUrl} onReset={handleReset} />}
 
 {process.env.NEXT_PUBLIC_VIRAL_CONTENT_AI === "1" && videoItems[0]?.file && (
-<ViralContentPanel videoFile={videoItems[0].file} />
+
+<ViralContentPanel
+videoFile={videoItems[0].file}
+onContent={setViralAI}
+/>
 )}
 
 <VideoHistory refreshKey={historyKey} />

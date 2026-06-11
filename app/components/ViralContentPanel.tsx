@@ -32,7 +32,13 @@ coverStyle: string;
 
 }
 
-export default function ViralContentPanel({ videoFile }: { videoFile: File }) {
+export default function ViralContentPanel({
+videoFile,
+onContent,
+}: {
+videoFile: File;
+onContent?: (content: ViralContent) => void;
+}) {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -60,6 +66,8 @@ export default function ViralContentPanel({ videoFile }: { videoFile: File }) {
       if (!res.ok || !data?.ok) throw new Error(data?.error || `Erro HTTP ${res.status}`);
       setTranscript(typeof data.transcript === "string" ? data.transcript : "");
       setContent(data.content as ViralContent);
+      onContent?.(data.content as ViralContent);
+
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao gerar.");
     } finally {

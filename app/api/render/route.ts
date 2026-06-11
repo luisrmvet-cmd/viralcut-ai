@@ -446,6 +446,44 @@ async function drawCaption(
     cmd.save(outPath);
   });
 }
+  async function drawIntroHook(
+videoPath: string,
+hook: string,
+outPath: string,
+tmpDir: string
+): Promise<void> {
+const textFilePath = path.join(tmpDir, "intro-hook.txt");
+await writeFile(textFilePath, wrapCaption(hook, 20), "utf8");
+const escPath = (p: string) => p.replace(/\\/g, "/").replace(/:/g, "\\:");
+const filter =
+`drawtext=fontfile='${escPath(CAPTION_FONT)}':` +
+`textfile='${escPath(textFilePath)}':` +
+`expansion=none:` +
+`fontcolor=white:fontsize=72:line_spacing=14:` +
+`box=1:boxcolor=black@0.65:boxborderw=28:` +
+`x=(w-text_w)/2:y=140:` +
+`enable='between(t,0,3)'`;
+
+await new Promise<void>((resolve, reject) => {
+const cmd = ffmpeg()
+.input(videoPath)
+.videoFilters(filter)
+.outputOptions([
+"-c:v libx264",
+"-preset veryfast",
+"-crf 23",
+"-pix_fmt yuv420p",
+"-c:a copy",
+"-movflags +faststart",
+])
+.output(outPath)
+.on("end", () => resolve())
+.on("error", reject);
+
+cmd.run();
+});
+}
+
 
 // === Fase 2B: música de fundo (copia o vídeo, não re-renderiza) ===
 function mixBackgroundMusic(
@@ -652,15 +690,28 @@ console.log(`[autocut-snap] fallback V2: ${e instanceof Error ? e.message : Stri
 const baseVideo = path.join(tmpDir, "video.mp4");
 const tRender = Date.now(); // PR 10.1
 await renderVideo(baseVideo, clipsForRender, duration, smartEdit, tmpDir);
+
+let videoWithHook = baseVideo;
+
+if (overlayAI.introHook && existsSync(CAPTION_FONT)) {
+const hookPath = path.join(tmpDir, "video-hook.mp4");
+try {
+await drawIntroHook(baseVideo, overlayAI.introHook, hookPath, tmpDir);
+if (existsSync(hookPath)) videoWithHook = hookPath;
+} catch (e) {
+console.error("[render] falha ao aplicar hook IA; seguindo sem hook:", e);
+}
+}
+
 console.log(`[perf] total-render: ${Date.now() - tRender}ms`); // PR 10.1
 
     // 2) legenda opcional (Fase 5)
     const caption = sanitizeCaption(String(form.get("caption") || overlayAI.subtitle || ""));
-    let videoForMusic = baseVideo;
+    let videoForMusic = videoWithHook;
     if (caption && existsSync(CAPTION_FONT)) {
       const captionedPath = path.join(tmpDir, "video-caption.mp4");
       try {
-        await drawCaption(baseVideo, caption, captionedPath, tmpDir);
+        await drawCaption(videoWithHook, caption, captionedPath, tmpDir);
         if (existsSync(captionedPath)) videoForMusic = captionedPath;
       } catch (e) {
         console.error("[render] falha ao aplicar legenda; seguindo sem legenda:", e);

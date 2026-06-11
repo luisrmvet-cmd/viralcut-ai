@@ -157,10 +157,17 @@ Responda EXCLUSIVAMENTE com um objeto JSON válido, sem texto antes ou depois, n
 "ctaCompartilhamento":"...",
 "ctaSeguidores":"...",
 
-"hashtags":["...","...","...","...","..."]
+"hashtags":["...","...","...","...","..."],
+
+"coverTitle":"...",
+"coverSubtitle":"...",
+"coverStyle":"curiosidade|alerta|emocao|autoridade|dramatico"
 }
 
 Forneça:
+- 1 título para capa.
+- 1 subtítulo para capa.
+- 1 estilo de capa.
 - 3 a 5 hooks.
 - 5 títulos para Instagram.
 - 5 títulos para TikTok.

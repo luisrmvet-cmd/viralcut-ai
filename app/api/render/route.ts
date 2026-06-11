@@ -655,7 +655,7 @@ await renderVideo(baseVideo, clipsForRender, duration, smartEdit, tmpDir);
 console.log(`[perf] total-render: ${Date.now() - tRender}ms`); // PR 10.1
 
     // 2) legenda opcional (Fase 5)
-    const caption = sanitizeCaption(String(form.get("caption") || ""));
+    const caption = sanitizeCaption(String(form.get("caption") || overlayAI.subtitle || ""));
     let videoForMusic = baseVideo;
     if (caption && existsSync(CAPTION_FONT)) {
       const captionedPath = path.join(tmpDir, "video-caption.mp4");

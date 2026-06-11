@@ -25,6 +25,11 @@ ctaCompartilhamento: string;
 ctaSeguidores: string;
 
 hashtags: string[];
+
+coverTitle: string;
+coverSubtitle: string;
+coverStyle: string;
+
 }
 
 export default function ViralContentPanel({ videoFile }: { videoFile: File }) {
@@ -153,6 +158,44 @@ export default function ViralContentPanel({ videoFile }: { videoFile: File }) {
 </button>
 </div>
 ))}
+
+<p style={{ ...styles.sectionLabel, marginTop: 14 }}>Capa IA</p>
+
+<div style={styles.item}>
+<span style={styles.itemText}>
+{content.coverTitle}
+</span>
+<button
+onClick={() => copy(content.coverTitle)}
+style={styles.copyBtn}
+>
+{copied === content.coverTitle ? "✓" : "copiar"}
+</button>
+</div>
+
+<div style={styles.item}>
+<span style={styles.itemText}>
+{content.coverSubtitle}
+</span>
+<button
+onClick={() => copy(content.coverSubtitle)}
+style={styles.copyBtn}
+>
+{copied === content.coverSubtitle ? "✓" : "copiar"}
+</button>
+</div>
+
+<div style={styles.item}>
+<span style={styles.itemText}>
+Estilo: {content.coverStyle}
+</span>
+<button
+onClick={() => copy(content.coverStyle)}
+style={styles.copyBtn}
+>
+{copied === content.coverStyle ? "✓" : "copiar"}
+</button>
+</div>
 
 
 <p style={{ ...styles.sectionLabel, marginTop: 14 }}>Legenda</p>

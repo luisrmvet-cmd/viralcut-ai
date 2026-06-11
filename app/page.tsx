@@ -283,6 +283,9 @@ window.scrollTo({ top: 0, behavior: "smooth" });
       }
       if (caption.trim()) fd.append("caption", caption.trim());
       if (smartEdit) fd.append("smartEdit", "1");
+      
+      if (process.env.NEXT_PUBLIC_VIRAL_CONTENT_AI === "1")
+fd.append("overlayAI", "1");
       // (Fase 9) AutoCut: só com 1 vídeo e 0 imagens; manda flag + duração.
 if (autoCut && files.length === 0 && videoItems.length === 1) {
 const srcDur = await getVideoDurationSec(videoItems[0].file);

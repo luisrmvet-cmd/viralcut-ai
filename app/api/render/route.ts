@@ -693,32 +693,12 @@ await renderVideo(baseVideo, clipsForRender, duration, smartEdit, tmpDir);
 
 let videoWithHook = baseVideo;
 
-if (overlayAI.introHook && existsSync(CAPTION_FONT)) {
-const hookPath = path.join(tmpDir, "video-hook.mp4");
-try {
-await drawIntroHook(baseVideo, overlayAI.introHook, hookPath, tmpDir);
-if (existsSync(hookPath)) videoWithHook = hookPath;
-} catch (e) {
-console.error("[render] falha ao aplicar hook IA; seguindo sem hook:", e);
-}
-}
-
 console.log(`[perf] total-render: ${Date.now() - tRender}ms`); // PR 10.1
 
     // 2) legenda opcional (Fase 5)
     const caption = sanitizeCaption(String(form.get("caption") || overlayAI.subtitle || ""));
     let videoForMusic = videoWithHook;
-    if (caption && existsSync(CAPTION_FONT)) {
-      const captionedPath = path.join(tmpDir, "video-caption.mp4");
-      try {
-        await drawCaption(videoWithHook, caption, captionedPath, tmpDir);
-        if (existsSync(captionedPath)) videoForMusic = captionedPath;
-      } catch (e) {
-        console.error("[render] falha ao aplicar legenda; seguindo sem legenda:", e);
-      }
-    } else if (caption && !existsSync(CAPTION_FONT)) {
-      console.warn("[render] legenda solicitada mas fonte não encontrada em", CAPTION_FONT);
-    }
+    
 
     // 3) música (Fase 4/3/2B)
     const uploadedMusic = form.get("musicFile");

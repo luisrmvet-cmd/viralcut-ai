@@ -1,7 +1,9 @@
 // app/components/SuccessScreen.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import EditorScreen from "./EditorScreen";
+
 
 // (DIAGNÓSTICO 8B.2) Painel visível para depurar a detecção de iOS.
 // Aparece quando NÃO estamos em produção OU quando `debug` é true.
@@ -31,6 +33,9 @@ export default function SuccessScreen({ videoUrl, onReset }: Props) {
   const [busy, setBusy] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
   const [iosMsg, setIosMsg] = useState<string | null>(null);
+  const fileRef = useRef<File | null>(null);
+  const [showEditor, setShowEditor] = useState(false);
+const editorEnabled = process.env.NEXT_PUBLIC_EDITOR === "1";
 
   // (DIAGNÓSTICO) dados crus de detecção para exibir no card
   const [dbg, setDbg] = useState<{
@@ -53,6 +58,33 @@ export default function SuccessScreen({ videoUrl, onReset }: Props) {
       });
     }
   }, []);
+
+  // (Correção iOS) Pré-carrega o arquivo do vídeo UMA vez quando a tela monta.
+  // Assim, ao tocar em "Salvar vídeo", o navigator.share() é chamado SEM nenhum
+  // await de rede no meio — preservando a ativação por gesto exigida pelo
+  // WebKit (sem isso, o share rejeita com NotAllowedError e cai no fallback).
+  // Só roda no iOS. Se falhar, fileRef fica nulo e handleIOSSave usa o caminho
+  // antigo (fetch na hora) como fallback.
+  useEffect(() => {
+    if (!isIOS || !videoUrl) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(videoUrl);
+        if (!res.ok) return;
+        const blob = await res.blob();
+        if (cancelled) return;
+        fileRef.current = new File([blob], `viralcut-${Date.now()}.mp4`, {
+          type: blob.type || "video/mp4",
+        });
+      } catch {
+        // sem suporte / falha de rede → mantém fileRef nulo (fallback assume)
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isIOS, videoUrl]);
 
   // DESKTOP/ANDROID: baixa o MP4 de verdade (inalterado).
   async function handleDownload() {
@@ -86,12 +118,18 @@ export default function SuccessScreen({ videoUrl, onReset }: Props) {
     setIosMsg(null);
     setBusy(true);
     try {
-      const res = await fetch(videoUrl);
-      if (!res.ok) throw new Error("fetch-failed");
-      const blob = await res.blob();
-      const file = new File([blob], `viralcut-${Date.now()}.mp4`, {
-        type: blob.type || "video/mp4",
-      });
+      // Usa o arquivo pré-carregado: assim o navigator.share() é chamado SEM
+      // nenhum await de rede antes, preservando a ativação por gesto do iOS.
+      // Só busca na hora se o pré-carregamento ainda não tiver concluído.
+      let file = fileRef.current;
+      if (!file) {
+        const res = await fetch(videoUrl);
+        if (!res.ok) throw new Error("fetch-failed");
+        const blob = await res.blob();
+        file = new File([blob], `viralcut-${Date.now()}.mp4`, {
+          type: blob.type || "video/mp4",
+        });
+      }
 
       const nav = navigator as Navigator & {
         canShare?: (data?: { files?: File[] }) => boolean;
@@ -194,9 +232,28 @@ export default function SuccessScreen({ videoUrl, onReset }: Props) {
         </>
       )}
 
-      <button type="button" onClick={onReset} style={styles.againBtn}>
-        ↺  Gerar Outro Vídeo
-      </button>
+      {editorEnabled && (
+<button
+type="button"
+onClick={() => setShowEditor(true)}
+style={styles.editBtn}
+>
+✦ Editar vídeo
+</button>
+)}
+
+<button type="button" onClick={onReset} style={styles.againBtn}>
+↻ Gerar Outro Vídeo
+</button>
+
+{editorEnabled && showEditor && (
+<EditorScreen
+videoUrl={videoUrl}
+onBack={() => setShowEditor(false)}
+/>
+
+)}
+
     </div>
   );
 }

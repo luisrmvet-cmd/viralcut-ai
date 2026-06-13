@@ -25,6 +25,7 @@ import { planCut, snapSegmentsToSilences, alignSegmentEndsToSilences } from "../
 import { rankCandidates } from "../../lib/viralscore";
 import { detectSilences } from "../../lib/silence";
 import { buildVideoOverlayAI } from "../../lib/videoOverlayAI";
+import { buildSoftAudioCleanChain } from "../../lib/audioclean";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -487,17 +488,20 @@ cmd.run();
 
 // === Fase 2B: música de fundo (copia o vídeo, não re-renderiza) ===
 function mixBackgroundMusic(
-  videoPath: string,
-  musicPath: string,
-  outPath: string
+videoPath: string,
+musicPath: string,
+outPath: string,
+improveAudio: boolean
 ): Promise<void> {
   return new Promise((resolve, reject) => {
+    const cleanChain = buildSoftAudioCleanChain(improveAudio);
+const voiceFilters = cleanChain ? `,${cleanChain}` : "";
     const cmd = ffmpeg()
       .input(videoPath)
       .input(musicPath)
       .inputOptions(["-stream_loop", "-1"])
       .complexFilter([
-`[0:a]volume=1.0[voice]`,
+`[0:a]volume=1.0${voiceFilters}[voice]`,
 `[1:a]volume=${MUSIC_VOLUME}[music]`,
 `[voice][music]amix=inputs=2:duration=first:dropout_transition=0[a]`
 ])
@@ -516,6 +520,157 @@ function mixBackgroundMusic(
   });
 }
 
+// === Fase 16A.5.2: corte preciso por trecho (re-encode) ===
+// Aditivo. Usado SÓ pelo branch mode:"cut". Não toca no pipeline atual.
+function bakeCutSegment(
+  inPath: string,
+  outPath: string,
+  startSec: number,
+  endSec: number
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cmd = ffmpeg(inPath).outputOptions([
+      "-ss", String(startSec),
+      "-to", String(endSec),
+      "-map", "0:v:0",
+      "-map", "0:a?",
+      "-c:v", "libx264",
+      "-preset", "veryfast",
+      "-crf", "20",
+      "-pix_fmt", "yuv420p",
+      "-c:a", "aac",
+      "-b:a", "160k",
+      "-ac", "2",
+      "-ar", "44100",
+      "-movflags", "+faststart",
+    ]);
+    attachLogging(cmd, "cut-seg", resolve, reject);
+    cmd.save(outPath);
+  });
+}
+
+// (Fase 16A.5.2-fix) Suporte a data URL de vídeo (cenário local: o render
+// devolve `data:video/mp4;base64,...` quando não há token do Vercel Blob).
+// Usado SÓ pelo branch mode:"cut".
+function isDataVideoUrl(url: string): boolean {
+  return /^data:video\/[a-zA-Z0-9.+-]+;base64,/.test(url);
+}
+
+async function writeDataVideoUrlToFile(
+  dataUrl: string,
+  outputPath: string
+): Promise<void> {
+  const commaIndex = dataUrl.indexOf(",");
+  if (commaIndex === -1) throw new Error("Data URL inválida.");
+  const base64 = dataUrl.slice(commaIndex + 1);
+  const buffer = Buffer.from(base64, "base64");
+  await writeFile(outputPath, buffer);
+}
+
+// (Fase 16A.5.2) Branch isolado de corte: recebe o MP4 final + os trechos
+// MANTIDOS (complemento de removedRanges), recodifica cada trecho com -ss/-to
+// (frame-accurate) e concatena reaproveitando concatClips. Não mexe em Upload
+// (usa o mesmo put), nem apaga o vídeo de origem (não vai pra blobUrlsToDelete).
+async function handleCutMode(
+  form: FormData,
+  jobId: string,
+  tmpDir: string
+): Promise<NextResponse> {
+  await mkdir(tmpDir, { recursive: true });
+
+  const cutUrl = String(form.get("videoUrl") || "").trim();
+  const isDataVideo = isDataVideoUrl(cutUrl);
+  if (!cutUrl || (!isDataVideo && !isAllowedBlobUrl(cutUrl))) {
+    return NextResponse.json(
+      { ok: false, jobId, error: "URL de vídeo inválida para corte." },
+      { status: 400 }
+    );
+  }
+
+  let segments: { start: number; end: number }[] = [];
+  try {
+    const raw: unknown = JSON.parse(String(form.get("segments") || "[]"));
+    if (Array.isArray(raw)) {
+      segments = raw
+        .map((s) => ({ start: Number(s.start), end: Number(s.end) }))
+        .filter(
+          (s) =>
+            Number.isFinite(s.start) &&
+            Number.isFinite(s.end) &&
+            s.end > s.start
+        )
+        .sort((a, b) => a.start - b.start);
+    }
+  } catch {
+    segments = [];
+  }
+  if (segments.length === 0) {
+    return NextResponse.json(
+      { ok: false, jobId, error: "Nenhum trecho válido para cortar." },
+      { status: 400 }
+    );
+  }
+
+  const inPath = path.join(tmpDir, "cut-in.mp4");
+  if (isDataVideo) {
+    // Local/sem token: o vídeo veio como data URL — decodifica direto.
+    await writeDataVideoUrlToFile(cutUrl, inPath);
+  } else {
+    const resp = await fetch(cutUrl);
+    if (!resp.ok) {
+      return NextResponse.json(
+        { ok: false, jobId, error: "Falha ao baixar o vídeo para corte." },
+        { status: 400 }
+      );
+    }
+    const buf = Buffer.from(await resp.arrayBuffer());
+    if (buf.byteLength > MAX_VIDEO_BYTES) {
+      return NextResponse.json(
+        { ok: false, jobId, error: "Vídeo acima do limite." },
+        { status: 413 }
+      );
+    }
+    await writeFile(inPath, buf);
+  }
+
+  const partPaths: string[] = [];
+  for (let i = 0; i < segments.length; i++) {
+    const out = path.join(tmpDir, `cut${i}.mp4`);
+    await bakeCutSegment(inPath, out, segments[i].start, segments[i].end);
+    partPaths.push(out);
+  }
+
+  const outPath = path.join(tmpDir, "cut-out.mp4");
+  if (partPaths.length === 1) {
+    await copyFile(partPaths[0], outPath);
+  } else {
+    const listPath = path.join(tmpDir, "cut-concat.txt");
+    await writeFile(
+      listPath,
+      partPaths.map((p) => `file '${p}'`).join("\n") + "\n",
+      "utf8"
+    );
+    await concatClips(listPath, outPath);
+  }
+
+  const outBuffer = await readFile(outPath);
+  try {
+    const uploaded = await put(`renders/viralcut-cut-${jobId}.mp4`, outBuffer, {
+      access: "public",
+      contentType: "video/mp4",
+    });
+    return NextResponse.json({ ok: true, url: uploaded.url });
+  } catch (e) {
+    if (process.env.NODE_ENV === "production") throw e;
+    console.warn("[cut] Vercel Blob sem token no local — data URL:", e);
+    return NextResponse.json({
+      ok: true,
+      url: `data:video/mp4;base64,${outBuffer.toString("base64")}`,
+      local: true,
+    });
+  }
+}
+
 export async function POST(req: NextRequest) {
   const jobId = randomUUID();
   const tmpDir = path.join(os.tmpdir(), "viralcut-renders", jobId);
@@ -523,8 +678,17 @@ export async function POST(req: NextRequest) {
 
   try {
     const form = await req.formData();
-    
+
+    // (Fase 16A.5.2) Branch de corte preciso. Aditivo e isolado: se mode !== "cut",
+    // NADA abaixo muda (comportamento atual idêntico). Reaproveita concatClips e put.
+    if (String(form.get("mode") || "") === "cut") {
+      return await handleCutMode(form, jobId, tmpDir);
+    }
+
     const autoCutOn = form.get("autoCut") === "1";
+
+    // (Fase 15E.1) Melhorar áudio automaticamente
+const improveAudio = form.get("improveAudio") === "1";
 
     const overlayAI = buildVideoOverlayAI(
 String(form.get("aiHook") || ""),
@@ -722,7 +886,7 @@ console.log(`[perf] total-render: ${Date.now() - tRender}ms`); // PR 10.1
 console.warn("[render] SKIP_MUSIC=1 — pulando mixBackgroundMusic; entregando vídeo sem música");
 await copyFile(videoForMusic, withMusicPath);
 } else {
-await mixBackgroundMusic(videoForMusic, musicPath, withMusicPath);
+await mixBackgroundMusic(videoForMusic, musicPath, withMusicPath, improveAudio);
 }
         if (existsSync(withMusicPath)) deliverPath = withMusicPath;
       } catch (e) {

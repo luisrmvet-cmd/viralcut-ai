@@ -156,6 +156,7 @@ export default function Home() {
   const [caption, setCaption] = useState<string>("");
   const [smartEdit, setSmartEdit] = useState(false);
   const [autoCut, setAutoCut] = useState(false); // (Fase 9) AutoCut AI — OFF por padrão
+  const [improveAudio, setImproveAudio] = useState(false); // (Fase 15E.1) Limpeza de áudio - OFF por padrão
     const [captionsEnabled, setCaptionsEnabled] = useState(false);
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("classico");
   const [loading, setLoading] = useState(false);
@@ -458,6 +459,16 @@ disabledReason="Legendas automáticas disponíveis para 15s e 30s nesta fase."
           />
           AutoCut AI (cortar vídeo longo em trechos distribuídos)
         </label>
+        
+        <label style={styles.ownMusicRow}>
+<input
+type="checkbox"
+checked={improveAudio}
+onChange={(e) => setImproveAudio(e.target.checked)}
+disabled={loading}
+/>
+Melhorar áudio automaticamente
+</label>
 
         <button
           onClick={handleSubmit}

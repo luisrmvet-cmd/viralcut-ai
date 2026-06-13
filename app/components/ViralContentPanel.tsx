@@ -8,6 +8,7 @@
 
 import { useState } from "react";
 import { upload } from "@vercel/blob/client";
+import { computeViralStrategy } from "../lib/viralstrategy";
 
 interface ViralContent {
 angulo: string;
@@ -259,7 +260,36 @@ style={styles.copyBtn}
 {copied === content.hashtags.join(" ") ? "✓" : "copiar"}
 </button>
 </div>
-
+{process.env.NEXT_PUBLIC_VIRAL_STRATEGY === "1" &&
+          (() => {
+            const strategy = computeViralStrategy(content.angulo);
+            return (
+              <>
+                <p style={{ ...styles.sectionLabel, marginTop: 14 }}>
+                  Estratégia Viral Avançada
+                </p>
+                <div style={styles.item}>
+                  <span style={styles.itemText}>
+                    Gatilho dominante: <b>{strategy.dominante}</b>
+                    <br />
+                    Gatilho secundário: <b>{strategy.secundario}</b>
+                    <br />
+                    Potencial de retenção: <b>{strategy.retencao}</b>
+                    <br />
+                    Potencial de compartilhamento:{" "}
+                    <b>{strategy.compartilhamento}</b>
+                    <br />
+                    Potencial emocional: <b>{strategy.emocional}</b>
+                    <br />
+                    Melhor plataforma: <b>{strategy.plataforma}</b>
+                  </span>
+                </div>
+                <div style={styles.item}>
+                  <span style={styles.itemText}>{strategy.motivo}</span>
+                </div>
+              </>
+            );
+          })()}
           <button
             onClick={regenerate}
             disabled={loading}

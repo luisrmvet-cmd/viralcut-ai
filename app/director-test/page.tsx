@@ -7,6 +7,7 @@
 "use client";
 
 import { useState } from "react";
+import { upload } from "@vercel/blob/client";
 
 export default function DirectorTestPage() {
   const [file, setFile] = useState<File | null>(null);
@@ -15,28 +16,42 @@ export default function DirectorTestPage() {
   const [error, setError] = useState<string | null>(null);
 
   async function handleAnalyze() {
-    if (!file) {
-      setError("Selecione um vídeo primeiro.");
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    setResult(null);
-    try {
-      const fd = new FormData();
-      fd.append("video", file);
-      const res = await fetch("/api/director", { method: "POST", body: fd });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(data?.error || `Erro HTTP ${res.status}`);
-      }
-      setResult(data);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  }
+if (!file) {
+setError("Selecione um vídeo primeiro.");
+return;
+}
+
+setLoading(true);
+setError(null);
+setResult(null);
+
+try {
+const blob = await upload(file.name, file, {
+access: "public",
+handleUploadUrl: "/api/upload",
+contentType: file.type || "video/mp4",
+});
+
+const res = await fetch("/api/director", {
+method: "POST",
+headers: { "Content-Type": "application/json" },
+body: JSON.stringify({ videoUrl: blob.url }),
+});
+
+const data = await res.json().catch(() => null);
+
+if (!res.ok) {
+throw new Error(data?.error || `Erro HTTP ${res.status}`);
+}
+
+setResult(data);
+} catch (e) {
+setError(e instanceof Error ? e.message : String(e));
+} finally {
+setLoading(false);
+}
+}
+
 
   return (
     <main

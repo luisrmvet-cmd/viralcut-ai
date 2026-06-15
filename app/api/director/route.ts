@@ -9,6 +9,7 @@ import { writeFile, mkdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { Readable } from "node:stream";
 import ffmpeg from "fluent-ffmpeg";
 import ffmpegStatic from "ffmpeg-static";
 import { transcribeWords } from "../../lib/transcribe";
@@ -47,18 +48,47 @@ export async function POST(req: NextRequest) {
   const tmpDir = path.join(os.tmpdir(), `director-${jobId}`);
 
   try {
-    const form = await req.formData();
-    const file = form.get("video");
-    if (!(file instanceof File) || file.size === 0) {
-      return NextResponse.json(
-        { ok: false, error: "Envie um arquivo no campo 'video'." },
-        { status: 400 }
-      );
-    }
-
     await mkdir(tmpDir, { recursive: true });
-    const videoPath = path.join(tmpDir, "input.mp4");
-    await writeFile(videoPath, Buffer.from(await file.arrayBuffer()));
+const videoPath = path.join(tmpDir, "input.mp4");
+
+const contentType = req.headers.get("content-type") || "";
+
+if (contentType.includes("application/json")) {
+const body = await req.json().catch(() => null);
+const videoUrl = typeof body?.videoUrl === "string" ? body.videoUrl : "";
+
+if (!videoUrl) {
+return NextResponse.json(
+{ ok: false, error: "Envie videoUrl no JSON." },
+{ status: 400 }
+);
+}
+
+const videoRes = await fetch(videoUrl);
+
+if (!videoRes.ok || !videoRes.body) {
+return NextResponse.json(
+{ ok: false, error: `Falha ao baixar vídeo: HTTP ${videoRes.status}` },
+{ status: 400 }
+);
+}
+
+const buffer = Buffer.from(await videoRes.arrayBuffer());
+await writeFile(videoPath, buffer);
+} else {
+const form = await req.formData();
+const file = form.get("video");
+
+if (!(file instanceof File) || file.size === 0) {
+return NextResponse.json(
+{ ok: false, error: "Envie um arquivo no campo 'video'." },
+{ status: 400 }
+);
+}
+
+await writeFile(videoPath, Buffer.from(await file.arrayBuffer()));
+}
+
 
     const audioPath = path.join(tmpDir, "audio.m4a");
     await extractAudio(videoPath, audioPath);

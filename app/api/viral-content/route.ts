@@ -23,6 +23,8 @@ import { del } from "@vercel/blob";
 import { isAllowedBlobUrl } from "../../lib/videoClip";
 import { transcribeWords } from "../../lib/transcribe";
 import { generateViralContent } from "../../lib/viralContent";
+import { scoreWindow } from "../../lib/viralscore";
+import type { WordTiming } from "../../lib/captions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,6 +36,39 @@ if (ffmpegStatic) {
 
 const FLAG_ON = process.env.NEXT_PUBLIC_VIRAL_CONTENT_AI === "1";
 const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
+
+// Fase 18.5 — Viral Score real (aditivo, flag default OFF).
+// Score OFF => resposta idêntica à anterior (nenhum campo extra).
+const SCORE_ON = process.env.VIRAL_CONTENT_SCORE === "1";
+
+/**
+ * Adapter estrutural p/ o Modo B (regenerar com transcript em cache).
+ * Timestamps sequenciais NÃO afetam a nota: scoreWindow roda numa janela que
+ * cobre todos os tokens, então a pontuação depende só das palavras reais.
+ */
+function tokensToWords(transcript: string): WordTiming[] {
+  return transcript
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word, i) => ({ word, start: i, end: i + 1 }));
+}
+
+/** Viral Score 0–100 (1a: densidade gatilhos/palavra) + faixa Alta/Média/Baixa. */
+function computeViralScore(words: WordTiming[]): {
+  viralScore: number;
+  viralChance: "Alta" | "Média" | "Baixa";
+} {
+  const span = words.length ? words[words.length - 1].end : 0;
+  const { total } = scoreWindow(words, 0, span); // total real do viralscore.ts
+  const numWords = words.length;
+  const raw = Number(process.env.VIRAL_SCORE_SCALE);
+  const SCALE = Number.isFinite(raw) && raw > 0 ? raw : 600;
+  const density = numWords > 0 ? total / numWords : 0;
+  const viralScore = Math.min(100, Math.round(density * SCALE));
+  const viralChance =
+    viralScore >= 70 ? "Alta" : viralScore >= 40 ? "Média" : "Baixa";
+  return { viralScore, viralChance };
+}
 
 /** Extrai áudio do vídeo (16kHz mono) — mesmo perfil usado nas legendas. */
 function extractAudio(videoPath: string, outPath: string): Promise<void> {
@@ -70,7 +105,8 @@ export async function POST(req: NextRequest) {
   if (cached) {
     try {
       const content = await generateViralContent(cached);
-      return NextResponse.json({ ok: true, content });
+      const score = SCORE_ON ? computeViralScore(tokensToWords(cached)) : {};
+      return NextResponse.json({ ok: true, content, ...score });
     } catch (e) {
       return NextResponse.json(
         { ok: false, error: e instanceof Error ? e.message : "Falha ao gerar conteúdo." },
@@ -123,7 +159,8 @@ export async function POST(req: NextRequest) {
     }
 
     const content = await generateViralContent(transcript);
-    return NextResponse.json({ ok: true, transcript, content });
+    const score = SCORE_ON ? computeViralScore(words) : {};
+    return NextResponse.json({ ok: true, transcript, content, ...score });
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "Falha ao processar vídeo." },

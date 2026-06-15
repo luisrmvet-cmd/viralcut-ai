@@ -79,3 +79,29 @@ return null;
 
 return segments[0];
 }
+export function buildOneClickDirectorInput(
+moments: DirectorMomentInput[],
+targetDuration = 30
+) {
+const bestSegment = chooseBestDirectorSegment(
+moments,
+targetDuration
+);
+
+const segments = chooseDirectorSegments(
+moments,
+targetDuration
+);
+
+return {
+bestSegment,
+segments,
+totalSegments: segments.length,
+hasSegment: bestSegment !== null,
+};
+}
+export function hasDirectorHighlights(
+moments: DirectorMomentInput[]
+): boolean {
+return buildOneClickDirectorInput(moments).hasSegment;
+}

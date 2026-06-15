@@ -31,6 +31,9 @@ coverTitle: string;
 coverSubtitle: string;
 coverStyle: string;
 
+viralScore?: number;
+viralChance?: string;
+
 }
 
 export default function ViralContentPanel({
@@ -44,6 +47,7 @@ onContent?: (content: ViralContent) => void;
   const [status, setStatus] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [content, setContent] = useState<ViralContent | null>(null);
+  const [oneClickRan, setOneClickRan] = useState(false);
   const [transcript, setTranscript] = useState<string>(""); // cache p/ regenerar
   const [copied, setCopied] = useState<string | null>(null);
 
@@ -128,6 +132,25 @@ onContent?: (content: ViralContent) => void;
 
       {content && (
         <>
+        {(typeof content.viralScore === "number" || content.viralChance) && (
+<div style={styles.item}>
+<span style={styles.itemText}>
+{typeof content.viralScore === "number" && (
+<>
+Viral Score: <b>{content.viralScore}/100</b>
+<br />
+</>
+)}
+
+{content.viralChance && (
+<>
+Chance de viralização: <b>{content.viralChance}</b>
+</>
+)}
+</span>
+</div>
+)}
+
           <p style={styles.sectionLabel}>Hooks (primeiros 3 segundos)</p>
           {content.hooks.map((h, i) => (
             <div key={`h${i}`} style={styles.item}>
@@ -301,9 +324,107 @@ style={styles.copyBtn}
       )}
 
       {error && <p style={styles.error}>{error}</p>}
-    </div>
-  );
-}
+{process.env.NEXT_PUBLIC_ONE_CLICK_VIRAL === "1" && (
+<div style={styles.panel}>
+<div style={styles.header}>
+<span style={styles.title}>ONE CLICK VIRAL AI</span>
+</div>
+
+<p style={styles.sectionLabel}>
+Transforme qualquer vídeo em um Reel viral automaticamente.
+</p>
+
+<div style={styles.item}>
+<span style={styles.itemText}>
+✓ Análise IA
+<br />
+✓ Melhores momentos
+<br />
+✓ Hook
+<br />
+✓ Título
+<br />
+✓ Legenda
+<br />
+✓ Hashtags
+<br />
+✓ CTA
+</span>
+</div>
+
+<button
+onClick={() => {
+setOneClickRan(true);
+void generateFromVideo();
+}}
+disabled={loading}
+style={{ ...styles.cta, ...(loading ? styles.ctaDisabled : {}) }}
+>
+{loading ? status || "Processando..." : "Gerar Reel Viral"}
+</button>
+
+{oneClickRan && (
+<div style={{ ...styles.item, marginTop: 12 }}>
+<span style={styles.itemText}>
+✓ One Click acionado
+{content && (
+                  <>
+                    <br />
+                    ✓ Análise IA concluída
+                    <br />
+                    ✓ Gatilho principal: {content.angulo}
+                    {content.hooks[0] && (
+                      <>
+                        <br />
+                        ✓ Hook principal: {content.hooks[0]}
+                      </>
+                    )}
+                    {content.titulosInstagram[0] && (
+                      <>
+                        <br />
+                        ✓ Título Instagram: {content.titulosInstagram[0]}
+                      </>
+                    )}
+                    {content.legenda && (
+                      <>
+                        <br />
+                        ✓ Legenda pronta: {content.legenda}
+                      </>
+                    )}
+                    {content.hashtags.length > 0 && (
+                      <>
+                        <br />
+                        ✓ Hashtags: {content.hashtags.join(" ")}
+                      </>
+                    )}
+                    {content.ctaComentarios && (
+                      <>
+                        <br />
+                        ✓ CTA comentários: {content.ctaComentarios}
+                      </>
+                    )}
+                    {content.ctaSeguidores && (
+                      <>
+                        <br />
+                        ✓ CTA seguidores: {content.ctaSeguidores}
+                      </>
+                    )}
+                    {content.coverTitle && (
+                      <>
+                        <br />
+                        ✓ Capa sugerida: {content.coverTitle}
+                      </>
+                    )}
+                  </>
+                )}
+</span>
+</div>
+)}
+</div>
+)}
+        </div>
+      )}
+  
 
 const styles: Record<string, React.CSSProperties> = {
   panel: {

@@ -492,6 +492,15 @@ videoFile={videoItems[0].file}
 onContent={setViralAI}
 />
 )}
+<a
+href="/director-test"
+target="_blank"
+rel="noopener noreferrer"
+style={styles.directorTestBtn}
+>
+🎬 Director Test
+</a>
+
 
 <VideoHistory refreshKey={historyKey} />
       </div>
@@ -649,6 +658,21 @@ const styles: Record<string, React.CSSProperties> = {
     transition: "opacity 0.18s ease",
   },
   ctaDisabled: { opacity: 0.45, cursor: "not-allowed", boxShadow: "none" },
+  
+  directorTestBtn: {
+display: "block",
+width: "100%",
+marginTop: 12,
+marginBottom: 16,
+padding: "12px 0",
+textAlign: "center",
+fontSize: 14,
+fontWeight: 700,
+color: "#fff",
+textDecoration: "none",
+borderRadius: 12,
+background: "linear-gradient(180deg, #7c3aed, #4c1d95)",
+},
   error: {
     marginTop: 18,
     padding: 12,

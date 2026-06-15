@@ -67,3 +67,15 @@ return selected;
 .sort((a, b) => a.start - b.start);
 
 }
+export function chooseBestDirectorSegment(
+moments: DirectorMomentInput[],
+targetDuration = 15
+): DirectorSegment | null {
+const segments = chooseDirectorSegments(moments, targetDuration);
+
+if (segments.length === 0) {
+return null;
+}
+
+return segments[0];
+}

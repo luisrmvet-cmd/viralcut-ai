@@ -49,5 +49,21 @@ snippet: moment.snippet,
 })
 .filter((segment) => segment.viralScore > 0)
 .sort((a, b) => b.viralScore - a.viralScore)
-.slice(0, 5);
+.reduce<DirectorSegment[]>((selected, segment) => {
+const total = selected.reduce((sum, item) => sum + (item.end - item.start), 0);
+
+if (total >= duration) return selected;
+
+const hasOverlap = selected.some((item) => {
+return segment.start < item.end && segment.end > item.start;
+});
+
+if (!hasOverlap) {
+selected.push(segment);
+}
+
+return selected;
+}, [])
+.sort((a, b) => a.start - b.start);
+
 }

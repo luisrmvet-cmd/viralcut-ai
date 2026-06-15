@@ -698,6 +698,7 @@ export async function POST(req: NextRequest) {
     }
 
     const autoCutOn = form.get("autoCut") === "1";
+    const oneClickViralOn = form.get("oneClickViral") === "1";
 
     // (Fase 15E.1) Melhorar áudio automaticamente
 const improveAudio = form.get("improveAudio") === "1";
@@ -796,7 +797,7 @@ const captionsActive = captionsRequested && (duration === 15 || duration === 30)
 
     // AutoCut (Fase 9): expande 1 vídeo em N segmentos distribuídos
 let clipsForRender = clips;
-if (autoCutOn && autoCutSourceDuration > 0 && clips.length === 1 && clips[0].type === "video") {
+if ((autoCutOn || oneClickViralOn) && autoCutSourceDuration > 0 && clips.length === 1 && clips[0].type === "video") {
   const plan = planCut(autoCutSourceDuration, duration, 5);
   
     let segs = Array.isArray(plan) ? plan : plan.segments;

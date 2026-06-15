@@ -74,6 +74,7 @@ type: "image" | "video";
 file: string;
 hdr?: boolean;
 start?: number; // offset em segundos na fonte (AutoCut)
+end?:boolean;
 };
 
 /** (8A.2) Detecta HDR (HLG/PQ) pelo stderr do `ffmpeg -i` (sem precisar de ffprobe). */
@@ -338,14 +339,25 @@ async function renderVideo(
   tmpDir: string,
   transitions0n: boolean = false
 ): Promise<void> {
-  const frames = slotFrames(totalSeconds, clips.length, smartEdit);
-  const clipPaths: string[] = [];
-const tClips = Date.now();
+   const baseFrames = slotFrames(totalSeconds, clips.length, smartEdit);
 
-console.log(
-`[perf] clips=${clips.length} frames=${frames.join(",")}`
-);
-  for (let i = 0; i < clips.length; i++) {
+   const frames = clips.map((clip, index) => {
+   const start = typeof clip.start === "number" ? clip.start : 0;
+   const end = typeof clip.end === "number" ? clip.end : undefined;
+
+   if (clip.type === "video" && typeof end === "number" && end > start) {
+   return Math.max(1, Math.round((end - start) * FPS));
+   }
+
+   return baseFrames[index] ?? Math.max(1, Math.round(totalSeconds * FPS));
+   });
+   const clipPaths: string[] = [];
+   const tClips = Date.now();
+
+   console.log(
+   `[perf] clips=${clips.length} frames=${frames.join(",")}`
+   );
+   for (let i = 0; i < clips.length; i++) {
     const c = clips[i];
     const outClip = path.join(tmpDir, `clip${i}.mp4`);
     if (c.type === "video") {
@@ -845,7 +857,11 @@ console.log(`[autocut-snap] fallback V2: ${e instanceof Error ? e.message : Stri
 }
 
   if (segs && segs.length > 1) {
-    clipsForRender = segs.map((s) => ({ ...clips[0], start: s.start ?? s.offset }));
+   clipsForRender = segs.map((s) => ({
+...clips[0],
+start: s.start ?? s.offset ?? 0,
+end: s.end,
+}));
     console.log(`[autocut] ${segs.length} segmentos planejados`);
   }
 }

@@ -23,7 +23,7 @@ hooks: string[];
 
 titulosInstagram: string[];
 titulosTikTok: string[];
-titulosShorts: string[];
+
 
 legenda: string;
 
@@ -102,19 +102,14 @@ Se houver mais de uma estratégia possível, escolha a que tenha maior potencial
 
 Regras dos títulos:
 Instagram:
-- Gere 5 títulos.
+- Gere 3 títulos.
 - Fortes e diretos.
 - Bons para capa.
 - No máximo 9 palavras.
 
 TikTok:
-- Gere 5 títulos.
+- Gere 3 títulos.
 - Mais curiosidade e impacto.
-- No máximo 9 palavras.
-
-YouTube Shorts:
-- Gere 5 títulos.
-- Mais explicativos.
 - No máximo 9 palavras.
 
 Todos devem:
@@ -149,7 +144,6 @@ Responda EXCLUSIVAMENTE com um objeto JSON válido, sem texto antes ou depois, n
 
 "titulosInstagram":["...","...","...","...","..."],
 "titulosTikTok":["...","...","...","...","..."],
-"titulosShorts":["...","...","...","...","..."],
 
 "legenda":"...",
 
@@ -168,10 +162,10 @@ Forneça:
 - 1 título para capa.
 - 1 subtítulo para capa.
 - 1 estilo de capa.
-- 3 a 5 hooks.
-- 5 títulos para Instagram.
-- 5 títulos para TikTok.
-- 5 títulos para YouTube Shorts.
+- 3 hooks.
+- 3 títulos para Instagram.
+- 3 títulos para TikTok.
+
 - 1 legenda.
 - 1 CTA para comentários.
 - 1 CTA para compartilhamento.
@@ -269,7 +263,6 @@ hooks?: unknown;
 
 titulosInstagram?: unknown;
 titulosTikTok?: unknown;
-titulosShorts?: unknown;
 
 legenda?: unknown;
 
@@ -313,7 +306,7 @@ typeof o.intensity === "string"
 
 const titulosInstagram = toStringList(o.titulosInstagram);
 const titulosTikTok = toStringList(o.titulosTikTok);
-const titulosShorts = toStringList(o.titulosShorts);
+
 
 const legenda = typeof o.legenda === "string" ? o.legenda.trim() : "";
 
@@ -325,12 +318,7 @@ const ctaSeguidores =
 typeof o.ctaSeguidores === "string" ? o.ctaSeguidores.trim() : "";
 
 const hashtags = toStringList(o.hashtags);
-  if (
-hooks.length === 0 ||
-titulosInstagram.length === 0 ||
-titulosTikTok.length === 0 ||
-titulosShorts.length === 0
-) {
+  if (hooks.length === 0 || titulosInstagram.length === 0 || titulosTikTok.length === 0) {
     throw new Error("IA não retornou hooks/títulos suficientes.");
   }
  return {
@@ -341,11 +329,10 @@ viralityLevel,
 dominantTrigger,
 intensity,
 
-hooks: hooks.slice(0, 5),
+hooks: hooks.slice(0, 3),
 
-titulosInstagram: titulosInstagram.slice(0, 5),
-titulosTikTok: titulosTikTok.slice(0, 5),
-titulosShorts: titulosShorts.slice(0, 5),
+titulosInstagram: titulosInstagram.slice(0, 3),
+titulosTikTok: titulosTikTok.slice(0, 3),
 
 legenda,
 

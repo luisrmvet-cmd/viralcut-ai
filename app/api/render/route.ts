@@ -699,7 +699,7 @@ export async function POST(req: NextRequest) {
 
     const autoCutOn = form.get("autoCut") === "1";
     const oneClickViralOn = form.get("oneClickViral") === "1";
-
+    
     // (Fase 15E.1) Melhorar áudio automaticamente
 const improveAudio = form.get("improveAudio") === "1";
 
@@ -801,7 +801,7 @@ if ((autoCutOn || oneClickViralOn) && autoCutSourceDuration > 0 && clips.length 
   const plan = planCut(autoCutSourceDuration, duration, 5);
   
     let segs = Array.isArray(plan) ? plan : plan.segments;
-
+    
   // Fase 15A — Viral Score (ativar: VIRAL_SCORE=1; default OFF)
   const viralOn = process.env.VIRAL_SCORE === "1";
   if (viralOn && segs && segs.length > 1) {

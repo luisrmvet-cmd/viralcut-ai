@@ -489,17 +489,15 @@ Melhorar áudio automaticamente
 
 <ViralContentPanel
 videoFile={videoItems[0].file}
+duration={duration}
 onContent={setViralAI}
+onRendered={(url) => {
+if (videoUrl) URL.revokeObjectURL(videoUrl);
+setVideoUrl(url);
+setHistoryKey((k) => k + 1);
+}}
 />
 )}
-<a
-href="/director-test"
-target="_blank"
-rel="noopener noreferrer"
-style={styles.directorTestBtn}
->
-🎬 Director Test
-</a>
 
 
 <VideoHistory refreshKey={historyKey} />

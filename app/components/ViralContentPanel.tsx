@@ -17,7 +17,7 @@ hooks: string[];
 
 titulosInstagram: string[];
 titulosTikTok: string[];
-titulosShorts: string[];
+
 
 legenda: string;
 
@@ -35,13 +35,34 @@ viralScore?: number;
 viralChance?: string;
 
 }
+function getVideoDurationSec(file: File): Promise<number> {
+return new Promise((resolve) => {
+const url = URL.createObjectURL(file);
+const v = document.createElement("video");
+v.preload = "metadata";
+v.onloadedmetadata = () => {
+const d = Number.isFinite(v.duration) ? v.duration : 0;
+URL.revokeObjectURL(url);
+resolve(d);
+};
+v.onerror = () => {
+URL.revokeObjectURL(url);
+resolve(0);
+};
+v.src = url;
+});
+}
 
 export default function ViralContentPanel({
 videoFile,
+duration,
 onContent,
+onRendered,
 }: {
 videoFile: File;
+duration: 15 | 30 | 45 | 60;
 onContent?: (content: ViralContent) => void;
+onRendered?: (url: string) => void;
 }) {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState("");
@@ -72,6 +93,34 @@ onContent?: (content: ViralContent) => void;
       setTranscript(typeof data.transcript === "string" ? data.transcript : "");
       setContent(data.content as ViralContent);
       onContent?.(data.content as ViralContent);
+      setStatus("Gerando Reel Viral...");
+
+const fd = new FormData();
+fd.append("duration", String(duration));
+fd.append("oneClickViral", "1");
+fd.append("autoCut", "1");
+const srcDur = await getVideoDurationSec(videoFile);
+fd.append("autoCutSourceDuration", String(srcDur > 0 ? srcDur : duration));
+
+
+fd.append("videoUrl1", blob.url);
+
+const renderRes = await fetch("/api/render", {
+method: "POST",
+body: fd,
+});
+
+const renderData = await renderRes.json().catch(() => null);
+
+if (!renderRes.ok || !renderData?.ok || !renderData?.url) {
+throw new Error(renderData?.error || `Erro HTTP ${renderRes.status}`);
+}
+
+console.log("renderData =", renderData);
+console.log("URL =", renderData.url);
+onRendered?.(renderData.url);
+setStatus("Reel Viral gerado!");
+
 
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao gerar.");
@@ -181,15 +230,6 @@ Chance de viralização: <b>{content.viralChance}</b>
 </div>
 ))}
 
-<p style={{ ...styles.sectionLabel, marginTop: 14 }}>Títulos Shorts</p>
-{content.titulosShorts.map((t, i) => (
-<div key={`shorts${i}`} style={styles.item}>
-<span style={styles.itemText}>{t}</span>
-<button onClick={() => copy(t)} style={styles.copyBtn}>
-{copied === t ? "✓" : "copiar"}
-</button>
-</div>
-))}
 
 <p style={{ ...styles.sectionLabel, marginTop: 14 }}>Capa IA</p>
 

@@ -68,7 +68,7 @@ onRendered?: (url: string) => void;
   const [status, setStatus] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [content, setContent] = useState<ViralContent | null>(null);
-  const [oneClickRan, setOneClickRan] = useState(false);
+  
   const [transcript, setTranscript] = useState<string>(""); // cache p/ regenerar
   const [copied, setCopied] = useState<string | null>(null);
 
@@ -412,7 +412,7 @@ Transforme qualquer vídeo em um Reel viral automaticamente.
 
 <button
 onClick={() => {
-setOneClickRan(true);
+
 void generateFromVideo();
 }}
 disabled={loading}
@@ -421,63 +421,6 @@ style={{ ...styles.cta, ...(loading ? styles.ctaDisabled : {}) }}
 {loading ? status || "Processando..." : "Gerar Reel Viral"}
 </button>
 
-{oneClickRan && (
-<div style={{ ...styles.item, marginTop: 12 }}>
-<span style={styles.itemText}>
-✓ One Click acionado
-{content && (
-                  <>
-                    <br />
-                    ✓ Análise IA concluída
-                    <br />
-                    ✓ Gatilho principal: {content.angulo}
-                    {content.hooks[0] && (
-                      <>
-                        <br />
-                        ✓ Hook principal: {content.hooks[0]}
-                      </>
-                    )}
-                    {content.titulosInstagram[0] && (
-                      <>
-                        <br />
-                        ✓ Título Instagram: {content.titulosInstagram[0]}
-                      </>
-                    )}
-                    {content.legenda && (
-                      <>
-                        <br />
-                        ✓ Legenda pronta: {content.legenda}
-                      </>
-                    )}
-                    {content.hashtags.length > 0 && (
-                      <>
-                        <br />
-                        ✓ Hashtags: {content.hashtags.join(" ")}
-                      </>
-                    )}
-                    {content.ctaComentarios && (
-                      <>
-                        <br />
-                        ✓ CTA comentários: {content.ctaComentarios}
-                      </>
-                    )}
-                    {content.ctaSeguidores && (
-                      <>
-                        <br />
-                        ✓ CTA seguidores: {content.ctaSeguidores}
-                      </>
-                    )}
-                    {content.coverTitle && (
-                      <>
-                        <br />
-                        ✓ Capa sugerida: {content.coverTitle}
-                      </>
-                    )}
-                  </>
-                )}
-</span>
-</div>
-)}
 </div>
 )}
         </div>

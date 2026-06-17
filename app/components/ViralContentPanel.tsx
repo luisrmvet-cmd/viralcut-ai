@@ -118,15 +118,31 @@ console.log("SAFE VIDEO URL =", safeVideoUrl);
 
 fd.append("videoUrl1", safeVideoUrl);
 fd.append("videoUrl", safeVideoUrl);
+
+
 const cutDuration = Number(duration) || 30;
 const sourceDuration = srcDur > 0 ? srcDur : cutDuration;
 
-const segments = [
-{
-start: 0,
-end: Math.min(cutDuration, sourceDuration),
-},
-];
+const parts = 3;
+const partDuration = cutDuration / parts;
+const gap = Math.max(0, (sourceDuration - partDuration) / parts);
+
+const segments = Array.from({ length: parts }, (_, i) => {
+const start = Math.min(
+i * gap,
+Math.max(0, sourceDuration - partDuration)
+);
+
+return {
+start,
+end: Math.min(start + partDuration, sourceDuration),
+};
+}).filter((s) => s.end > s.start);
+
+fd.append("segments", JSON.stringify(segments));
+
+console.log("ONE CLICK SEGMENTS =", segments);
+
 
 fd.append("segments", JSON.stringify(segments));
 

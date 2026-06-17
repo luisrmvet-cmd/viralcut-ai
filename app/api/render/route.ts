@@ -630,8 +630,13 @@ async function handleCutMode(
   } else {
    let resp: Response | null = null;
 
+const cleanCutUrl = cutUrl.split("?")[0];
+
+console.log("[render] cutUrl original =", cutUrl);
+console.log("[render] cleanCutUrl =", cleanCutUrl);
+
 for (let attempt = 0; attempt < 12; attempt++) {
-resp = await fetch(cutUrl, {
+resp = await fetch(cleanCutUrl, {
 cache: "no-store",
 headers: {
 "User-Agent": "ViralCutAI/1.0",
@@ -640,9 +645,15 @@ headers: {
 
 if (resp.ok) break;
 
-console.warn(`[render] tentativa ${attempt + 1}/12 falhou:`, resp.status, cutUrl);
+console.warn(
+`[render] tentativa ${attempt + 1}/12 falhou:`,
+resp.status,
+cleanCutUrl
+);
+
 await new Promise((r) => setTimeout(r, 1500));
 }
+
 
 if (!resp || !resp.ok) {
       return NextResponse.json(

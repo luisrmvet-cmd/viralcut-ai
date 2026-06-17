@@ -639,13 +639,10 @@ console.log("[handleCutMode] cutUrl final =", cutUrl);
   } else {
    let resp: Response | null = null;
 
-const cleanCutUrl = cutUrl.split("?")[0];
-
 console.log("[render] cutUrl original =", cutUrl);
-console.log("[render] cleanCutUrl =", cleanCutUrl);
 
 for (let attempt = 0; attempt < 12; attempt++) {
-resp = await fetch(cleanCutUrl, {
+resp = await fetch(cutUrl, {
 cache: "no-store",
 headers: {
 "User-Agent": "ViralCutAI/1.0",
@@ -657,7 +654,7 @@ if (resp.ok) break;
 console.warn(
 `[render] tentativa ${attempt + 1}/12 falhou:`,
 resp.status,
-cleanCutUrl
+cutUrl
 );
 
 await new Promise((r) => setTimeout(r, 1500));

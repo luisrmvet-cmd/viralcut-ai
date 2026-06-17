@@ -715,9 +715,13 @@ console.log("[overlayAI]", overlayAI);
 const autoCutSourceDuration = Number(form.get("autoCutSourceDuration") || 0);
 
     const imageFiles: File[] = [];
+    const videoFiles: File[] = [];
     for (const [key, value] of form.entries()) {
       if (key.startsWith("image") && value instanceof File && value.size > 0) {
         imageFiles.push(value);
+      }
+      if (key.startsWith("video") && value instanceof File && value.size > 0) {
+      videoFiles.push(value);
       }
     }
     const videoUrls: string[] = [];
@@ -729,7 +733,7 @@ const autoCutSourceDuration = Number(form.get("autoCutSourceDuration") || 0);
 console.log("[render] videoUrls =", videoUrls);
 console.log("[render] imageFiles =", imageFiles.length);
 console.log("[render] form keys =", [...form.keys()]);
-    if (imageFiles.length === 0 && videoUrls.length === 0) {
+    if (imageFiles.length === 0 && videoUrls.length === 0 && videoFiles.length === 0) {
       return NextResponse.json(
         { ok: false, jobId, error: "Nenhuma mídia recebida." },
         { status: 400 }
@@ -765,6 +769,19 @@ const captionsActive = captionsRequested && (duration === 15 || duration === 30)
       await writeFile(p, Buffer.from(await imageFiles[i].arrayBuffer()));
       clips.push({ type: "image", file: p });
     }
+      for (let i = 0; i < videoFiles.length; i++) {
+      const rawPath = path.join(tmpDir, `uploaded-video-${i + 1}.mp4`);
+      const buf = Buffer.from(await videoFiles[i].arrayBuffer());
+
+      if (buf.byteLength > MAX_VIDEO_BYTES) {
+      console.warn("[render] vídeo enviado acima do limite, ignorado");
+continue;
+}
+
+await writeFile(rawPath, buf);
+const hdr = await probeIsHDR(rawPath);
+clips.push({ type: "video", file: rawPath, hdr });
+}
 
     // vídeos -> baixa do Blob, detecta HDR, vira clipe de vídeo
     for (let i = 0; i < videoUrls.length; i++) {

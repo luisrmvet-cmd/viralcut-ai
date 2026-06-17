@@ -82,6 +82,8 @@ onRendered?: (url: string) => void;
         handleUploadUrl: "/api/upload",
         contentType: videoFile.type || "video/mp4",
       });
+      console.log("BLOB COMPLETO =", JSON.stringify(blob, null, 2));
+
       console.log("[front] upload blob =", blob);
       console.log("[front] blob.url =", blob.url);
       setStatus("Transcrevendo e gerando...");

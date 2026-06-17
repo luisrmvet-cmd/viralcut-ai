@@ -106,7 +106,9 @@ fd.append("autoCutSourceDuration", String(srcDur > 0 ? srcDur : duration));
 
 console.log("blob =", blob);
 console.log("blob.url =", blob?.url);
-fd.append("videoUrl1", blob.url);
+const safeVideoUrl = (blob as any).downloadUrl || blob.url;
+fd.append("videoUrl1", safeVideoUrl);
+
 
 const renderRes = await fetch("/api/render", {
 method: "POST",

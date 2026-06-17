@@ -774,11 +774,26 @@ const captionsActive = captionsRequested && (duration === 15 || duration === 30)
         continue;
       }
       blobUrlsToDelete.push(url);
-      const resp = await fetch(url);
-      if (!resp.ok) {
-        console.warn("[render] falha ao baixar vídeo:", url, resp.status);
-        continue;
-      }
+      let resp: Response | null = null;
+
+for (let attempt = 0; attempt < 10; attempt++) {
+resp = await fetch(url);
+
+if (resp.ok) break;
+
+console.warn(
+`[render] tentativa ${attempt + 1}/10 falhou:`,
+resp.status
+);
+
+await new Promise((r) => setTimeout(r, 1000));
+}
+
+if (!resp || !resp.ok) {
+console.warn("[render] falha ao baixar vídeo:", url);
+continue;
+}
+
       const buf = Buffer.from(await resp.arrayBuffer());
       if (buf.byteLength > MAX_VIDEO_BYTES) {
         console.warn("[render] vídeo acima do limite, ignorado:", url);

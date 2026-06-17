@@ -82,6 +82,10 @@ onRendered?: (url: string) => void;
         handleUploadUrl: "/api/upload",
         contentType: videoFile.type || "video/mp4",
       });
+      console.log("[front] esperando blob propagar...");
+      await new Promise((r) => setTimeout(r, 5000));
+      console.log("[front] blob propagado");
+
       console.log("BLOB COMPLETO =", JSON.stringify(blob, null, 2));
 
       console.log("[front] upload blob =", blob);

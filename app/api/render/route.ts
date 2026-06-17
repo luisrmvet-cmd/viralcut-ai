@@ -664,14 +664,13 @@ Number.isFinite(s.end) &&
 s.end > s.start
 );
 
-
 const sourceDuration = Number(form.get("autoCutSourceDuration") || 0);
 const targetDuration = Number(form.get("duration") || 30);
 
 const moments = analyzeDirector(words, silences, {
 sourceDuration,
-minScore: 45,
-topPerCategory: 2,
+minScore: 20,
+topPerCategory: 4,
 });
 
 const directorResult = buildOneClickAutoCutVideo(
@@ -686,11 +685,44 @@ end: Number(s.end),
 }))
 .filter((s) => s.end > s.start);
 
+if (segments.length === 0 && words.length > 0) {
+console.warn("[DirectorAutoCut] sem moments; fallback por frases");
+
+const phraseSegments: { start: number; end: number }[] = [];
+
+let currentStart = words[0].start;
+let currentEnd = words[0].end;
+let total = 0;
+
+for (const w of words) {
+currentEnd = w.end;
+
+if (currentEnd - currentStart >= 5) {
+phraseSegments.push({
+start: Math.max(0, currentStart - 0.15),
+end: currentEnd + 0.15,
+});
+
+total += currentEnd - currentStart;
+currentStart = w.end;
+
+if (total >= targetDuration) break;
+}
+}
+
+segments = phraseSegments.filter((s) => s.end > s.start);
+}
+
+console.log("[DirectorAutoCut] words =", words.length);
+console.log("[DirectorAutoCut] silences =", silences.length);
+console.log("[DirectorAutoCut] moments =", moments.length);
 console.log("[DirectorAutoCut] segments =", segments);
+
 } catch (e) {
-console.warn("[DirectorAutoCut] falhou, usando fallback AutoCut:", e);
+console.warn("[DirectorAutoCut] falhou:", e);
 }
 }
+
 
   if (segments.length === 0) {
     return NextResponse.json(

@@ -590,7 +590,16 @@ async function handleCutMode(
 ): Promise<NextResponse> {
   await mkdir(tmpDir, { recursive: true });
 
-  const cutUrl = String(form.get("videoUrl") || "").trim();
+  const cutUrl = String(
+form.get("videoUrl1") ||
+form.get("videoUrl") ||
+""
+).trim();
+
+console.log("[handleCutMode] keys =", Array.from(form.keys()));
+console.log("[handleCutMode] videoUrl1 =", form.get("videoUrl1"));
+console.log("[handleCutMode] videoUrl =", form.get("videoUrl"));
+console.log("[handleCutMode] cutUrl final =", cutUrl);
   const isDataVideo = isDataVideoUrl(cutUrl);
   if (!cutUrl || (!isDataVideo && !isAllowedBlobUrl(cutUrl))) {
     return NextResponse.json(

@@ -114,6 +114,19 @@ console.log("SAFE VIDEO URL =", safeVideoUrl);
 
 fd.append("videoUrl1", safeVideoUrl);
 fd.append("videoUrl", safeVideoUrl);
+const cutDuration = Number(duration) || 30;
+const sourceDuration = srcDur > 0 ? srcDur : cutDuration;
+
+const segments = [
+{
+start: 0,
+end: Math.min(cutDuration, sourceDuration),
+},
+];
+
+fd.append("segments", JSON.stringify(segments));
+
+console.log("ONE CLICK SEGMENTS =", segments);
 
 console.log("ONE CLICK FORM KEYS =", Array.from(fd.keys()));
 

@@ -100,6 +100,7 @@ onRendered?: (url: string) => void;
       setStatus("Gerando Reel Viral...");
 
 const fd = new FormData();
+fd.append("mode", "cut");
 fd.append("duration", String(duration));
 fd.append("oneClickViral", "1");
 fd.append("autoCut", "1");
@@ -110,7 +111,11 @@ console.log("blob =", blob);
 console.log("blob.url =", blob?.url);
 const safeVideoUrl = blob.url;
 console.log("SAFE VIDEO URL =", safeVideoUrl);
+
 fd.append("videoUrl1", safeVideoUrl);
+fd.append("videoUrl", safeVideoUrl);
+
+console.log("ONE CLICK FORM KEYS =", Array.from(fd.keys()));
 
 
 const renderRes = await fetch("/api/render", {

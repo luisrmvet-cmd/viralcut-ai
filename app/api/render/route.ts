@@ -26,6 +26,8 @@ import { rankCandidates } from "../../lib/viralscore";
 import { detectSilences } from "../../lib/silence";
 import { buildVideoOverlayAI } from "../../lib/videoOverlayAI";
 import { buildSoftAudioCleanChain } from "../../lib/audioclean";
+import { analyzeDirector } from "@/app/lib/director";
+import { buildOneClickAutoCutVideo } from "@/app/lib/oneClickAutoCutVideo";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -608,23 +610,88 @@ console.log("[handleCutMode] cutUrl final =", cutUrl);
     );
   }
 
-  let segments: { start: number; end: number }[] = [];
-  try {
-    const raw: unknown = JSON.parse(String(form.get("segments") || "[]"));
-    if (Array.isArray(raw)) {
-      segments = raw
-        .map((s) => ({ start: Number(s.start), end: Number(s.end) }))
-        .filter(
-          (s) =>
-            Number.isFinite(s.start) &&
-            Number.isFinite(s.end) &&
-            s.end > s.start
-        )
-        .sort((a, b) => a.start - b.start);
-    }
-  } catch {
-    segments = [];
-  }
+let segments: { start: number; end: number }[] = [];
+
+try {
+const raw: unknown = JSON.parse(String(form.get("segments") || "[]"));
+if (Array.isArray(raw)) {
+segments = raw
+.map((s) => ({ start: Number(s.start), end: Number(s.end) }))
+.filter(
+(s) =>
+Number.isFinite(s.start) &&
+Number.isFinite(s.end) &&
+s.end > s.start
+)
+.sort((a, b) => a.start - b.start);
+}
+} catch {
+segments = [];
+}
+
+const oneClickViralOn = form.get("oneClickViral") === "1";
+
+if (oneClickViralOn && segments.length === 0) {
+console.log("[DirectorAutoCut] gerando segmentos inteligentes...");
+
+try {
+const rawWords = await transcribeWords(cutUrl);
+const rawSilences = await detectSilences(cutUrl);
+
+const words = rawWords
+.map((w: any) => ({
+text: String(w.text || w.word || ""),
+start: Number(w.start || 0),
+end: Number(w.end || w.start || 0),
+}))
+.filter(
+(w) =>
+w.text &&
+Number.isFinite(w.start) &&
+Number.isFinite(w.end) &&
+w.end >= w.start
+);
+
+const silences = rawSilences
+.map((s: any) => ({
+start: Number(s.start || 0),
+end: Number(s.end || 0),
+}))
+.filter(
+(s) =>
+Number.isFinite(s.start) &&
+Number.isFinite(s.end) &&
+s.end > s.start
+);
+
+
+const sourceDuration = Number(form.get("autoCutSourceDuration") || 0);
+const targetDuration = Number(form.get("duration") || 30);
+
+const moments = analyzeDirector(words, silences, {
+sourceDuration,
+minScore: 45,
+topPerCategory: 2,
+});
+
+const directorResult = buildOneClickAutoCutVideo(
+moments,
+targetDuration
+);
+
+segments = directorResult.clips
+.map((s) => ({
+start: Number(s.start),
+end: Number(s.end),
+}))
+.filter((s) => s.end > s.start);
+
+console.log("[DirectorAutoCut] segments =", segments);
+} catch (e) {
+console.warn("[DirectorAutoCut] falhou, usando fallback AutoCut:", e);
+}
+}
+
   if (segments.length === 0) {
     return NextResponse.json(
       { ok: false, jobId, error: "Nenhum trecho válido para cortar." },

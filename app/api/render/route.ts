@@ -662,11 +662,24 @@ await new Promise((r) => setTimeout(r, 1500));
 
 
 if (!resp || !resp.ok) {
-      return NextResponse.json(
-        { ok: false, jobId, error: "Falha ao baixar o vídeo para corte." },
-        { status: 400 }
-      );
-    }
+const body = resp ? await resp.text().catch(() => "") : "";
+
+console.error("[CUT DOWNLOAD ERROR]", {
+cutUrl,
+status: resp?.status,
+body,
+});
+
+return NextResponse.json(
+{
+ok: false,
+jobId,
+error: `Falha ao baixar vídeo (${resp?.status})`,
+},
+{ status: 400 }
+);
+}
+
     const buf = Buffer.from(await resp.arrayBuffer());
     if (buf.byteLength > MAX_VIDEO_BYTES) {
       return NextResponse.json(

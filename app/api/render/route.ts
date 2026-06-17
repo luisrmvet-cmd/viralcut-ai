@@ -726,7 +726,9 @@ const autoCutSourceDuration = Number(form.get("autoCutSourceDuration") || 0);
         videoUrls.push(value.trim());
       }
     }
-
+console.log("[render] videoUrls =", videoUrls);
+console.log("[render] imageFiles =", imageFiles.length);
+console.log("[render] form keys =", [...form.keys()]);
     if (imageFiles.length === 0 && videoUrls.length === 0) {
       return NextResponse.json(
         { ok: false, jobId, error: "Nenhuma mídia recebida." },

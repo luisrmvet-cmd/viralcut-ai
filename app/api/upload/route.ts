@@ -23,7 +23,9 @@ export async function POST(request: Request): Promise<NextResponse> {
       }),
       // Chamado pela Vercel quando o upload conclui. Em localhost sem túnel
       // público este callback não dispara — e tudo bem, não dependemos dele.
-      onUploadCompleted: async () => {},
+      onUploadCompleted: async ({ blob }) => {
+      console.log("[upload] concluído:", blob.url);
+      },
     });
     return NextResponse.json(jsonResponse);
   } catch (error) {

@@ -628,8 +628,23 @@ async function handleCutMode(
     // Local/sem token: o vídeo veio como data URL — decodifica direto.
     await writeDataVideoUrlToFile(cutUrl, inPath);
   } else {
-    const resp = await fetch(cutUrl);
-    if (!resp.ok) {
+   let resp: Response | null = null;
+
+for (let attempt = 0; attempt < 12; attempt++) {
+resp = await fetch(cutUrl, {
+cache: "no-store",
+headers: {
+"User-Agent": "ViralCutAI/1.0",
+},
+});
+
+if (resp.ok) break;
+
+console.warn(`[render] tentativa ${attempt + 1}/12 falhou:`, resp.status, cutUrl);
+await new Promise((r) => setTimeout(r, 1500));
+}
+
+if (!resp || !resp.ok) {
       return NextResponse.json(
         { ok: false, jobId, error: "Falha ao baixar o vídeo para corte." },
         { status: 400 }

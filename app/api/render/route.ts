@@ -20,10 +20,14 @@ import { DEFAULT_BPM } from "../../lib/smartEdit";
 // (Fase 8A.2) normalização de vídeo + guarda anti-SSRF
 import { NORMALIZE_VF_SDR, NORMALIZE_VF_HDR, BLUR_FILL_VF_SDR, BLUR_FILL_VF_HDR, isAllowedBlobUrl } from "../../lib/videoClip";
 import { transcribeWords } from "../../lib/transcribe";
-import { buildCaptionsAss, type CaptionStyle } from "../../lib/captions";
-import { planCut, snapSegmentsToSilences, alignSegmentEndsToSilences } from "../../lib/autocut";
+import { buildCaptionsAss, type CaptionStyle, type WordTiming } from "../../lib/captions";
+import { planCut, snapSegmentsToSilences, alignSegmentEndsToSilences, type SilenceInterval } from "../../lib/autocut";
 import { rankCandidates } from "../../lib/viralscore";
 import { detectSilences } from "../../lib/silence";
+import {
+buildReelsPlan,
+REELS_ORCHESTRATOR_ON,
+} from "../../lib/orchestrator";
 import { buildVideoOverlayAI } from "../../lib/videoOverlayAI";
 import { buildSoftAudioCleanChain } from "../../lib/audioclean";
 import { analyzeDirector } from "@/app/lib/director";
@@ -976,7 +980,63 @@ continue;
     // AutoCut (Fase 9): expande 1 vídeo em N segmentos distribuídos
 let clipsForRender = clips;
 if ((autoCutOn || oneClickViralOn) && autoCutSourceDuration > 0 && clips.length === 1 && clips[0].type === "video") {
-  const plan = planCut(autoCutSourceDuration, duration, 5);
+  
+  if (REELS_ORCHESTRATOR_ON) {
+      // === Fase 18.8 — Orquestrador invisível (flag REELS_ORCHESTRATOR=1) ===
+      // Mesmos flags, MESMA ordem e MESMA I/O condicional do fluxo validado.
+      // words/silences extraídos UMA vez aqui e repassados ao buildReelsPlan.
+      const viralOn = process.env.VIRAL_SCORE === "1";
+      const snapOn = process.env.AUTOCUT_SNAP !== "0";
+      const guardOn = process.env.AUTOCUT_SPEECH_GUARD !== "0";
+      // planCut só "aplica" quando a fonte é maior que o alvo — mesma condição
+      // que hoje dispara a I/O nos branches viral/snap. Vídeo curto = passthrough:
+      // zero transcrição e zero silêncio, igual ao fluxo atual (velocidade preservada).
+      const willCut = autoCutSourceDuration > duration;
+
+      let vsWords: WordTiming[] = [];
+      if (viralOn && willCut) {
+        try {
+          const vsAudioPath = path.join(tmpDir, "viralscore-audio.m4a");
+          await extractAudioForCaptions(clips[0].file, vsAudioPath);
+          vsWords = await transcribeWords(vsAudioPath, { language: "pt" });
+        } catch (e) {
+          console.log(`[orchestrator] transcrição viral falhou: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+    
+      let silences: SilenceInterval[] = [];
+      if (snapOn && willCut) {
+        try {
+          silences = await detectSilences(clips[0].file);
+        } catch (e) {
+          console.log(`[orchestrator] detectSilences falhou: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+
+      const plan = buildReelsPlan({
+        sourceDuration: autoCutSourceDuration,
+        targetDuration: duration,
+        words: vsWords,
+        silences,
+        viralSelection: viralOn,
+        snap: snapOn,
+        speechGuard: guardOn,
+      });
+      const segs = plan.segments;
+      console.log(
+        `[orchestrator] ON viral=${viralOn} snap=${snapOn} guard=${guardOn} ` +
+          `words=${vsWords.length} silences=${silences.length} segmentos=${segs.length}`
+      );
+
+      if (segs.length > 1) {
+        clipsForRender = segs.map((s) => ({
+          ...clips[0],
+          start: s.start,
+        }));
+      }
+    } else {
+      // === Fluxo validado (Fase 9–15A) — INALTERADO (caminho de rollback) ===
+      const plan = planCut(autoCutSourceDuration, duration, 5);
   
     let segs = Array.isArray(plan) ? plan : plan.segments;
     
@@ -1044,7 +1104,7 @@ end: s.end,
     console.log(`[autocut] ${segs.length} segmentos planejados`);
   }
 }
-
+}
 // 1) render principal: bake de cada clipe + concat demuxer
 const baseVideo = path.join(tmpDir, "video.mp4");
 const tRender = Date.now(); // PR 10.1
@@ -1130,39 +1190,43 @@ await mixBackgroundMusic(videoForMusic, musicPath, withMusicPath, improveAudio);
     const videoBuffer = await readFile(deliverPath);
 
 try {
-  const tBlob = Date.now(); // PR 10.1
-  const uploaded = await put(`renders/viralcut-${jobId}.mp4`, videoBuffer, {
-    access: "public",
-    contentType: "video/mp4",
-  });
-  console.log(`[perf] blob-upload: ${Date.now() - tBlob}ms`); // PR 10.1
-  return NextResponse.json({ ok: true, url: uploaded.url });
+const tBlob = Date.now();
+const uploaded = await put(`renders/viralcut-${jobId}.mp4`, videoBuffer, {
+access: "public",
+contentType: "video/mp4",
+});
+
+console.log(`[perf] blob-upload: ${Date.now() - tBlob}ms`);
+return NextResponse.json({ ok: true, url: uploaded.url });
 } catch (e) {
-  // Só local + sem token: não derruba o render. Caso contrário, mantém o comportamento atual.
-  if (process.env.NODE_ENV === "production") throw e;
-  console.warn("[render] Vercel Blob sem token no local — usando data URL para teste:", e);
-  return NextResponse.json({
-    ok: true,
-    url: `data:video/mp4;base64,${videoBuffer.toString("base64")}`,
-    local: true,
-  });
+if (process.env.NODE_ENV === "production") throw e;
+
+console.warn("[render] Vercel Blob sem token no local — usando data URL para teste:", e);
+return NextResponse.json({
+ok: true,
+url: `data:video/mp4;base64,${videoBuffer.toString("base64")}`,
+local: true,
+});
 }
-  } catch (err) {
-    console.error("[render] ERRO:", err);
-    return NextResponse.json(
-      {
-        ok: false,
-        jobId,
-        error: err instanceof Error ? err.message : "Falha ao gerar o vídeo.",
-      },
-      { status: 500 }
-    );
-  } finally {
-    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-    if (blobUrlsToDelete.length > 0) {
+} catch (err) {
+console.error("[render] ERRO:", err);
+return NextResponse.json(
+{
+ok: false,
+jobId,
+error: err instanceof Error ? err.message : "Falha ao gerar o vídeo.",
+},
+{ status: 500 }
+);
+} finally {
+await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+
+if (blobUrlsToDelete.length > 0) {
 try {
 await del(blobUrlsToDelete);
 } catch (e) {
 console.warn("[render] falha ao apagar blobs:", e);
 }
-}}}
+}
+}
+}

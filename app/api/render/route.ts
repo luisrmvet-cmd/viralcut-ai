@@ -541,31 +541,53 @@ const voiceFilters = cleanChain ? `,${cleanChain}` : "";
 // === Fase 16A.5.2: corte preciso por trecho (re-encode) ===
 // Aditivo. Usado SÓ pelo branch mode:"cut". Não toca no pipeline atual.
 function bakeCutSegment(
-  inPath: string,
-  outPath: string,
-  startSec: number,
-  endSec: number
+inPath: string,
+outPath: string,
+startSec: number,
+endSec: number
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const cmd = ffmpeg(inPath).outputOptions([
-      "-ss", String(startSec),
-      "-to", String(endSec),
-      "-map", "0:v:0",
-      "-map", "0:a?",
-      "-c:v", "libx264",
-      "-preset", "veryfast",
-      "-crf", "20",
-      "-pix_fmt", "yuv420p",
-      "-c:a", "aac",
-      "-b:a", "160k",
-      "-ac", "2",
-      "-ar", "44100",
-      "-movflags", "+faststart",
-    ]);
-    attachLogging(cmd, "cut-seg", resolve, reject);
-    cmd.save(outPath);
-  });
+return new Promise((resolve, reject) => {
+const duration = Math.max(0.2, endSec - startSec);
+
+const cmd = ffmpeg(inPath)
+.inputOptions([
+"-ss",
+String(startSec),
+])
+.outputOptions([
+"-t",
+String(duration),
+"-map",
+"0:v:0",
+"-map",
+"0:a?",
+"-c:v",
+"libx264",
+"-preset",
+"ultrafast",
+"-crf",
+"28",
+"-pix_fmt",
+"yuv420p",
+"-c:a",
+"aac",
+"-b:a",
+"128k",
+"-ac",
+"2",
+"-ar",
+"44100",
+"-threads",
+"1",
+"-movflags",
+"+faststart",
+]);
+
+attachLogging(cmd, "cut-seg", resolve, reject);
+cmd.save(outPath);
+});
 }
+
 
 // (Fase 16A.5.2-fix) Suporte a data URL de vídeo (cenário local: o render
 // devolve `data:video/mp4;base64,...` quando não há token do Vercel Blob).
@@ -615,6 +637,10 @@ console.log("[handleCutMode] cutUrl final =", cutUrl);
   }
 
 let segments: { start: number; end: number }[] = [];
+const duration = Number(form.get("duration") || 30);
+const autoCutSourceDuration = Number(
+form.get("autoCutSourceDuration") || duration
+);
 
 try {
 const raw: unknown = JSON.parse(String(form.get("segments") || "[]"));
@@ -635,7 +661,7 @@ segments = [];
 
 const oneClickViralOn = form.get("oneClickViral") === "1";
 
-if (oneClickViralOn && segments.length === 0) {
+if (false && oneClickViralOn && segments.length === 0) {
 console.log("[DirectorAutoCut] gerando segmentos inteligentes...");
 
 try {
@@ -671,23 +697,26 @@ s.end > s.start
 const sourceDuration = Number(form.get("autoCutSourceDuration") || 0);
 const targetDuration = Number(form.get("duration") || 30);
 
-const moments = analyzeDirector(words, silences, {
+const reelsPlan = buildReelsPlan({
 sourceDuration,
-minScore: 20,
-topPerCategory: 4,
+targetDuration,
+words: words as any,
+silences,
+clipLength: 5,
+viralSelection: true,
+snap: true,
+speechGuard: true,
 });
 
-const directorResult = buildOneClickAutoCutVideo(
-moments,
-targetDuration
-);
-
-segments = directorResult.clips
+segments = reelsPlan.segments
 .map((s) => ({
 start: Number(s.start),
-end: Number(s.end),
+end: Number(s.start + s.duration),
 }))
 .filter((s) => s.end > s.start);
+
+console.log("[orchestrator 2.0] aplicado no handleCutMode:", segments);
+
 
 if (segments.length === 0 && words.length > 0) {
 console.warn("[DirectorAutoCut] sem moments; fallback por frases");
@@ -719,7 +748,6 @@ segments = phraseSegments.filter((s) => s.end > s.start);
 
 console.log("[DirectorAutoCut] words =", words.length);
 console.log("[DirectorAutoCut] silences =", silences.length);
-console.log("[DirectorAutoCut] moments =", moments.length);
 console.log("[DirectorAutoCut] segments =", segments);
 
 } catch (e) {
@@ -729,11 +757,15 @@ console.warn("[DirectorAutoCut] falhou:", e);
 
 
   if (segments.length === 0) {
-    return NextResponse.json(
-      { ok: false, jobId, error: "Nenhum trecho válido para cortar." },
-      { status: 400 }
-    );
-  }
+console.warn("[DirectorAutoCut] nenhum trecho válido; fallback para AutoCut validado");
+
+const fallbackPlan = planCut(autoCutSourceDuration, duration, 5);
+
+segments = fallbackPlan.segments.map((s) => ({
+start: s.start,
+end: s.start + s.duration,
+}));
+}
 
   const inPath = path.join(tmpDir, "cut-in.mp4");
   if (isDataVideo) {
@@ -792,7 +824,7 @@ error: `Falha ao baixar vídeo (${resp?.status})`,
     }
     await writeFile(inPath, buf);
   }
-
+  
   const partPaths: string[] = [];
   for (let i = 0; i < segments.length; i++) {
     const out = path.join(tmpDir, `cut${i}.mp4`);

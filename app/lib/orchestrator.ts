@@ -56,6 +56,52 @@ export interface ReelsPlan {
  * segmento (igual ao route); os fallbacks internos de cada módulo já garantem
  * devolução do plano inalterado em qualquer borda.
  */
+
+function scoreSegmentByWords(
+seg: CutPlan["segments"][number],
+words: WordTiming[]
+): number {
+const start = seg.start;
+const end = seg.start + seg.duration;
+
+const text = words
+.filter((w) => w.start >= start && w.end <= end)
+.map((w) => String((w as any).text || (w as any).word || ""))
+.join(" ")
+.toLowerCase();
+
+let score = 0;
+
+const strongWords = [
+"atenção",
+"cuidado",
+"nunca",
+"sempre",
+"perigo",
+"grave",
+"urgente",
+"importante",
+"verdade",
+"erro",
+"segredo",
+"descubra",
+"você precisa",
+"ninguém te conta",
+"olha isso",
+"presta atenção",
+];
+
+for (const word of strongWords) {
+if (text.includes(word)) score += 12;
+}
+
+if (text.includes("?")) score += 10;
+if (text.length >= 40 && text.length <= 220) score += 10;
+if (text.length < 15) score -= 15;
+
+return score;
+}
+
 export function buildReelsPlan(input: ReelsPlanInput): ReelsPlan {
   const {
     sourceDuration,
@@ -71,6 +117,20 @@ export function buildReelsPlan(input: ReelsPlanInput): ReelsPlan {
   // 1) planCut — route: planCut(autoCutSourceDuration, duration, 5)
   const plan = planCut(sourceDuration, targetDuration, clipLength);
   let segs: CutPlan["segments"] = plan.segments;
+
+  if (words.length > 0 && segs.length > 1) {
+segs = [...segs]
+.map((seg) => ({
+...seg,
+__score: scoreSegmentByWords(seg, words),
+}))
+.sort((a, b) => b.__score - a.__score)
+.slice(0, Math.max(1, Math.ceil(targetDuration / clipLength)))
+.sort((a, b) => a.start - b.start)
+.map(({ __score, ...seg }) => seg);
+
+console.log("[orchestrator 2.0] strong-moment selection:", segs);
+}
 
   // 2) Viral Score — route: VIRAL_SCORE=1 (default OFF) + vsWords.length > 0
   if (viralSelection && words.length > 0 && segs.length > 1) {

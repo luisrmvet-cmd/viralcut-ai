@@ -361,10 +361,12 @@ export default function EditorScreen({ videoUrl, onBack }: EditorScreenProps) {
     try {
       const fd = new FormData();
       fd.append("mode", "cut");
-           fd.append("videoUrl", videoUrl);
+     
+      fd.append("videoUrl", videoUrl);
       fd.append("segments", JSON.stringify(segments));
       const res = await fetch("/api/render", { method: "POST", body: fd });
       const data = await res.json();
+      
       if (!data?.ok || !data?.url) {
         throw new Error(data?.error || "Falha ao exportar o corte.");
       }

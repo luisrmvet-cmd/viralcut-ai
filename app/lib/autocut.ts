@@ -1,5 +1,5 @@
 // app/lib/autocut.ts
-// (Fase 9 — AutoCut AI) Corte DETERMINÍSTICO, sem IA semântica.
+// (Fase 9 — AutoCut AexportI) Corte DETERMINÍSTICO, sem IA semântica.
 // Estratégia: "trechos distribuídos" — N clipes curtos espalhados
 // uniformemente pelo vídeo longo, concatenados até a duração-alvo
 // (15/30/45/60s), gerando um efeito de "melhores momentos".
@@ -9,7 +9,7 @@
 // pipeline de render já validado. Isso mantém esta etapa 100% testável e
 // sem qualquer regressão.
 
-export type CutSegment = {
+ type CutSegment = {
   start: number;     // segundo de início no vídeo original
   duration: number;  // duração do trecho, em segundos
 };

@@ -71,6 +71,42 @@ onRendered?: (url: string) => void;
   
   const [transcript, setTranscript] = useState<string>(""); // cache p/ regenerar
   const [copied, setCopied] = useState<string | null>(null);
+async function generateHookTitle() {
+setError(null);
+setLoading(true);
+
+try {
+setStatus("Transcrevendo e gerando...");
+
+const blob = await upload(videoFile.name, videoFile, {
+access: "public",
+handleUploadUrl: "/api/upload",
+contentType: videoFile.type || "video/mp4",
+});
+
+await new Promise((r) => setTimeout(r, 5000));
+
+const res = await fetch("/api/viral-content", {
+method: "POST",
+headers: { "Content-Type": "application/json" },
+body: JSON.stringify({ videoUrl: blob.url }),
+});
+
+const data = await res.json().catch(() => null);
+if (!res.ok || !data?.ok) {
+throw new Error(data?.error || `Erro HTTP ${res.status}`);
+}
+
+setTranscript(typeof data.transcript === "string" ? data.transcript : "");
+setContent(data.content as ViralContent);
+onContent?.(data.content as ViralContent);
+setStatus("Conteúdo gerado!");
+} catch (e) {
+setError(e instanceof Error ? e.message : "Erro ao gerar conteúdo.");
+} finally {
+setLoading(false);
+}
+}
 
   async function generateFromVideo() {
     setError(null);
@@ -90,18 +126,8 @@ onRendered?: (url: string) => void;
 
       console.log("[front] upload blob =", blob);
       console.log("[front] blob.url =", blob.url);
-      setStatus("Transcrevendo e gerando...");
-      const res = await fetch("/api/viral-content", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ videoUrl: blob.url }),
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.ok) throw new Error(data?.error || `Erro HTTP ${res.status}`);
-      setTranscript(typeof data.transcript === "string" ? data.transcript : "");
-      setContent(data.content as ViralContent);
-      onContent?.(data.content as ViralContent);
       setStatus("Gerando Reel Viral...");
+      setContent(null);
 
 const fd = new FormData();
 fd.append("mode", "cut");
@@ -189,7 +215,7 @@ setStatus("Reel Viral gerado!");
 
       {!content && (
         <button
-          onClick={generateFromVideo}
+          onClick={generateHookTitle}
           disabled={loading}
           style={{ ...styles.cta, ...(loading ? styles.ctaDisabled : {}) }}
         >

@@ -411,28 +411,28 @@ style={styles.copyBtn}
 {process.env.NEXT_PUBLIC_ONE_CLICK_VIRAL === "1" && (
 <div style={styles.panel}>
 <div style={styles.header}>
-<span style={styles.title}>ONE CLICK VIRAL AI</span>
+<span style={styles.title}>GERAR REEL VIRAL IA</span>
 </div>
 
 <p style={styles.sectionLabel}>
-Transforme qualquer vídeo em um Reel viral automaticamente.
+A IA analisa todo o vídeo e cria um Reel profissional automaticamente.
 </p>
 
 <div style={styles.item}>
 <span style={styles.itemText}>
-✓ Análise IA
+✓ Analisa todo o vídeo
 <br />
-✓ Melhores momentos
+✓ Escolhe os melhores momentos
 <br />
-✓ Hook
+✓ Remove silêncios automaticamente
 <br />
-✓ Título
+✓ Preserva frases completas
 <br />
-✓ Legenda
+✓ Cortes profissionais e naturais
 <br />
-✓ Hashtags
+✓ Distribui os melhores trechos
 <br />
-✓ CTA
+✓ Reel pronto para Instagram, TikTok e Facebook
 </span>
 </div>
 

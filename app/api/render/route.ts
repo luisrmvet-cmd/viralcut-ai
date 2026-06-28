@@ -854,12 +854,21 @@ error: `Falha ao baixar vídeo (${resp?.status})`,
     return NextResponse.json({ ok: true, url: uploaded.url });
   } catch (e) {
     if (process.env.NODE_ENV === "production") throw e;
-    console.warn("[cut] Vercel Blob sem token no local — data URL:", e);
-    return NextResponse.json({
-      ok: true,
-      url: `data:video/mp4;base64,${outBuffer.toString("base64")}`,
-      local: true,
-    });
+    console.warn("[cut] Vercel Blob sem token no local — salvando em /public/renders:", e);
+
+const publicDir = path.join(process.cwd(), "public", "renders");
+await mkdir(publicDir, { recursive: true });
+
+const publicName = `viralcut-cut-${jobId}.mp4`;
+const publicPath = path.join(publicDir, publicName);
+
+await copyFile(outPath, publicPath);
+
+return NextResponse.json({
+ok: true,
+url: `/renders/${publicName}`,
+local: true,
+});
   }
 }
 

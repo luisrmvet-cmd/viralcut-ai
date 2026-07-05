@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import ffmpeg from "fluent-ffmpeg";
-import ffmpegStatic from "ffmpeg-static";
+const ffmpegStatic = process.env.FFMPEG_PATH || "ffmpeg";
 import { del, put } from "@vercel/blob";
 // (Fase 6) Ken Burns/zoom/pan por imagem
 import {
@@ -41,7 +41,7 @@ console.log(`[perf] ${label}: ${Date.now() - start}ms`);
 }
 
 if (ffmpegStatic) {
-  ffmpeg.setFfmpegPath(ffmpegStatic as unknown as string);
+  ffmpeg.setFfmpegPath(ffmpegStatic);
 }
 
 const ALLOWED_DURATIONS = [15, 30, 45, 60];

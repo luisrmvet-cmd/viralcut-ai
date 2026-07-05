@@ -12,7 +12,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["fluent-ffmpeg"],
+  serverExternalPackages: ["fluent-ffmpeg", "ffmpeg-static"],
 
   outputFileTracingIncludes: {
     "/api/render": ["./assets/fonts/**/*"], // (Fase 5) fonte da legenda no bundle

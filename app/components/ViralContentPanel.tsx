@@ -134,6 +134,8 @@ fd.append("mode", "cut");
 fd.append("duration", String(duration));
 fd.append("oneClickViral", "1");
 fd.append("autoCut", "1");
+fd.append("captions", "1");
+fd.append("captionStyle", "karaoke");
 const srcDur = await getVideoDurationSec(videoFile);
 fd.append("autoCutSourceDuration", String(srcDur > 0 ? srcDur : duration));
 

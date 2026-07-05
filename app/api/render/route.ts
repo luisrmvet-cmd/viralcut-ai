@@ -1,6 +1,6 @@
 // app/api/render/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { writeFile, mkdir, readFile, rm, copyFile } from "node:fs/promises";
+import { writeFile, mkdir, readFile, rm, copyFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import os from "node:os";
@@ -641,7 +641,14 @@ const duration = Number(form.get("duration") || 30);
 const autoCutSourceDuration = Number(
 form.get("autoCutSourceDuration") || duration
 );
+const captionsRequested = String(form.get("captions") || "") === "1";
+const rawCaptionStyle = String(form.get("captionStyle") || "classico");
+const captionStyle: CaptionStyle =
+rawCaptionStyle === "karaoke" || rawCaptionStyle === "boxed"
+? rawCaptionStyle
+: "classico";
 
+const captionsActive = captionsRequested && (duration === 15 || duration === 30);
 try {
 const raw: unknown = JSON.parse(String(form.get("segments") || "[]"));
 if (Array.isArray(raw)) {
@@ -658,6 +665,8 @@ s.end > s.start
 } catch {
 segments = [];
 }
+console.log("[cut] segments recebidos:", segments);
+console.log("[cut] total segments:", segments.length);
 
 const oneClickViralOn = form.get("oneClickViral") === "1";
 
@@ -760,11 +769,17 @@ console.warn("[DirectorAutoCut] falhou:", e);
 console.warn("[DirectorAutoCut] nenhum trecho válido; fallback para AutoCut validado");
 
 const fallbackPlan = planCut(autoCutSourceDuration, duration, 5);
+console.log("[DEBUG FALLBACK] autoCutSourceDuration:", autoCutSourceDuration);
+console.log("[DEBUG FALLBACK] duration:", duration);
+console.log("[DEBUG FALLBACK] fallbackPlan:", fallbackPlan);
+console.log("[DEBUG FALLBACK] fallback segments:", fallbackPlan.segments);
 
 segments = fallbackPlan.segments.map((s) => ({
 start: s.start,
 end: s.start + s.duration,
 }));
+console.log("[DEBUG FALLBACK] segments depois do fallback:", segments);
+console.log("[DEBUG FALLBACK] segments length depois:", segments.length);
 }
 
   const inPath = path.join(tmpDir, "cut-in.mp4");
@@ -772,59 +787,74 @@ end: s.start + s.duration,
     // Local/sem token: o vídeo veio como data URL — decodifica direto.
     await writeDataVideoUrlToFile(cutUrl, inPath);
   } else {
-   let resp: Response | null = null;
-
-console.log("[render] cutUrl original =", cutUrl);
+let lastDownloadError: any = null;
+let buf: Buffer | null = null;
 
 for (let attempt = 0; attempt < 12; attempt++) {
-resp = await fetch(cutUrl, {
+try {
+console.log(`[render] download tentativa ${attempt + 1}/12`, cutUrl);
+
+const resp = await fetch(cutUrl, {
 cache: "no-store",
 headers: {
 "User-Agent": "ViralCutAI/1.0",
+"Connection": "close",
 },
 });
 
-if (resp.ok) break;
-
-console.warn(
-`[render] tentativa ${attempt + 1}/12 falhou:`,
-resp.status,
-cutUrl
-);
-
-await new Promise((r) => setTimeout(r, 1500));
+if (!resp.ok) {
+const body = await resp.text().catch(() => "");
+throw new Error(`HTTP ${resp.status} ${body.slice(0, 300)}`);
 }
 
+const ab = await resp.arrayBuffer();
+buf = Buffer.from(ab);
 
-if (!resp || !resp.ok) {
-const body = resp ? await resp.text().catch(() => "") : "";
+console.log("[render] download bytes:", buf.byteLength);
 
-console.error("[CUT DOWNLOAD ERROR]", {
+if (buf.byteLength < 1024 * 100) {
+throw new Error(`Download muito pequeno: ${buf.byteLength} bytes`);
+}
+
+if (buf.byteLength > MAX_VIDEO_BYTES) {
+return NextResponse.json(
+{ ok: false, jobId, error: "Vídeo acima do limite." },
+{ status: 413 }
+);
+}
+
+await writeFile(inPath, buf);
+
+const st = await stat(inPath);
+console.log("[render] inPath salvo:", inPath, "size:", st.size);
+
+break;
+} catch (e) {
+lastDownloadError = e;
+console.warn(`[render] download tentativa ${attempt + 1}/12 falhou:`, e);
+
+if (attempt < 11) {
+await new Promise((r) => setTimeout(r, 1500 + attempt * 500));
+}
+}
+}
+
+if (!buf) {
+console.error("[CUT DOWNLOAD ERROR FINAL]", {
 cutUrl,
-status: resp?.status,
-body,
+error: lastDownloadError,
 });
 
 return NextResponse.json(
 {
 ok: false,
 jobId,
-error: `Falha ao baixar vídeo (${resp?.status})`,
+error: "Falha ao baixar vídeo para corte. Tente novamente.",
 },
 { status: 400 }
 );
 }
-
-    const buf = Buffer.from(await resp.arrayBuffer());
-    if (buf.byteLength > MAX_VIDEO_BYTES) {
-      return NextResponse.json(
-        { ok: false, jobId, error: "Vídeo acima do limite." },
-        { status: 413 }
-      );
-    }
-    await writeFile(inPath, buf);
   }
-  
   const partPaths: string[] = [];
   for (let i = 0; i < segments.length; i++) {
     const out = path.join(tmpDir, `cut${i}.mp4`);
@@ -832,18 +862,57 @@ error: `Falha ao baixar vídeo (${resp?.status})`,
     partPaths.push(out);
   }
 
-  const outPath = path.join(tmpDir, "cut-out.mp4");
+  let outPath = path.join(tmpDir, "cut-out.mp4");
   if (partPaths.length === 1) {
     await copyFile(partPaths[0], outPath);
   } else {
     const listPath = path.join(tmpDir, "cut-concat.txt");
-    await writeFile(
-      listPath,
-      partPaths.map((p) => `file '${p}'`).join("\n") + "\n",
-      "utf8"
-    );
+          const concatList =
+partPaths.map((p) => `file '${p.replace(/\\/g, "/").replace(/'/g, "'\\''")}'`).join("\n") + "\n";
+
+console.log("[cut] concatList:", concatList);
+
+await writeFile(listPath, concatList, "utf8");
     await concatClips(listPath, outPath);
   }
+// ---------- Legendas automáticas no modo corte ----------
+if (captionsActive) {
+try {
+const tCap = Date.now();
+const asrAudioPath = path.join(tmpDir, "cut-captions-audio.m4a");
+
+await extractAudioForCaptions(outPath, asrAudioPath);
+
+const words = await transcribeWords(asrAudioPath, { language: "pt" });
+console.log(`[cut captions] palavras transcritas: ${words.length}`);
+
+if (words.length > 0) {
+const assPath = path.join(tmpDir, "cut-captions.ass");
+
+await writeFile(
+assPath,
+buildCaptionsAss(words, {
+style: captionStyle,
+width: 1080,
+height: 1920,
+fontName: "DejaVu Sans",
+}),
+"utf8"
+);
+
+const fontsDir = path.join(process.cwd(), "assets", "fonts");
+const captionedPath = path.join(tmpDir, "cut-captioned.mp4");
+
+await burnCaptions(outPath, assPath, fontsDir, captionedPath);
+
+outPath = captionedPath;
+}
+
+console.log(`[perf] cut captions: ${Date.now() - tCap}ms`);
+} catch (err) {
+console.error("[cut captions] falhou, seguindo sem legenda:", err);
+}
+}
 
   const outBuffer = await readFile(outPath);
   try {

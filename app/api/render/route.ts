@@ -883,6 +883,14 @@ const asrAudioPath = path.join(tmpDir, "cut-captions-audio.m4a");
 await extractAudioForCaptions(outPath, asrAudioPath);
 
 const words = await transcribeWords(asrAudioPath, { language: "pt" });
+
+for (const w of words) {
+w.word = w.word
+.replace(/heliquiose/gi, "erliquiose")
+.replace(/erlichiose/gi, "erliquiose")
+.replace(/erliquiose/gi, "erliquiose");
+}
+
 console.log(`[cut captions] palavras transcritas: ${words.length}`);
 
 if (words.length > 0) {

@@ -18,7 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import ffmpeg from "fluent-ffmpeg";
-import ffmpegStatic from "ffmpeg-static";
+const ffmpegStatic = process.env.FFMPEG_PATH || "ffmpeg";
 import { del } from "@vercel/blob";
 import { isAllowedBlobUrl } from "../../lib/videoClip";
 import { transcribeWords } from "../../lib/transcribe";
@@ -31,7 +31,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 if (ffmpegStatic) {
-  ffmpeg.setFfmpegPath(ffmpegStatic as unknown as string);
+ffmpeg.setFfmpegPath(ffmpegStatic);
 }
 
 const FLAG_ON = process.env.NEXT_PUBLIC_VIRAL_CONTENT_AI === "1";

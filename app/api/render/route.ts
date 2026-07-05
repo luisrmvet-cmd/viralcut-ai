@@ -58,7 +58,7 @@ const CLIP_ENC = [
 ];
 
 // === Fase 3: biblioteca de músicas ===
-const MUSIC_DIR = path.join(process.cwd(), "public", "music");
+const MUSIC_DIR = path.join(/* turbopackIgnore: true */ process.cwd(), "public", "music");
 const MUSIC_FILES: Record<string, string> = {
   cinematic: "cinematic.mp3",
   motivational: "motivational.mp3",
@@ -70,7 +70,7 @@ const DEFAULT_MUSIC = "cinematic";
 const MUSIC_VOLUME = 0.05;
 
 // === Fase 5: legenda ===
-const CAPTION_FONT = path.join(process.cwd(), "assets", "fonts", "DejaVuSans-Bold.ttf");
+const CAPTION_FONT = path.join(/* turbopackIgnore: true */ process.cwd(), "assets", "fonts", "DejaVuSans-Bold.ttf");
 const CAPTION_MAX_LEN = 120;
 const CAPTION_WRAP = 22;
 
@@ -899,7 +899,7 @@ fontName: "DejaVu Sans",
 "utf8"
 );
 
-const fontsDir = path.join(process.cwd(), "assets", "fonts");
+const fontsDir = path.join(/* turbopackIgnore: true */ process.cwd(), "assets", "fonts");
 const captionedPath = path.join(tmpDir, "cut-captioned.mp4");
 
 await burnCaptions(outPath, assPath, fontsDir, captionedPath);
@@ -924,7 +924,7 @@ console.error("[cut captions] falhou, seguindo sem legenda:", err);
     if (process.env.NODE_ENV === "production") throw e;
     console.warn("[cut] Vercel Blob sem token no local — salvando em /public/renders:", e);
 
-const publicDir = path.join(process.cwd(), "public", "renders");
+const publicDir = path.join(/*turbopackIgnore: true */ process.cwd(), "public", "renders");
 await mkdir(publicDir, { recursive: true });
 
 const publicName = `viralcut-cut-${jobId}.mp4`;
@@ -1282,7 +1282,7 @@ await mixBackgroundMusic(videoForMusic, musicPath, withMusicPath, improveAudio);
             "utf8"
           );
 
-          const fontsDir = path.join(process.cwd(), "assets", "fonts");
+          const fontsDir = path.join(/* turbopackIgnore: true */ process.cwd(), "assets", "fonts");
           const captionedPath = path.join(tmpDir, "captioned.mp4");
           await burnCaptions(deliverPath, assPath, fontsDir, captionedPath);
           await copyFile(captionedPath, deliverPath);

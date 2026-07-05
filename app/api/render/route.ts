@@ -67,7 +67,7 @@ const MUSIC_FILES: Record<string, string> = {
   viral: "viral.mp3",
 };
 const DEFAULT_MUSIC = "cinematic";
-const MUSIC_VOLUME = 0.05;
+const MUSIC_VOLUME = 0.03;
 
 // === Fase 5: legenda ===
 const CAPTION_FONT = path.join(/* turbopackIgnore: true */ process.cwd(), "assets", "fonts", "DejaVuSans-Bold.ttf");
@@ -1229,6 +1229,7 @@ console.log(`[perf] total-render: ${Date.now() - tRender}ms`); // PR 10.1
     
 
     // 3) música (Fase 4/3/2B)
+    const musicOn = form.get("musicOn") === "1";
     const uploadedMusic = form.get("musicFile");
     let musicPath: string;
     if (uploadedMusic instanceof File && uploadedMusic.size > 0) {
@@ -1242,7 +1243,7 @@ console.log(`[perf] total-render: ${Date.now() - tRender}ms`); // PR 10.1
     }
 
     let deliverPath = videoForMusic;
-    if (existsSync(musicPath)) {
+    if (musicOn && existsSync(musicPath)) {
       const withMusicPath = path.join(tmpDir, "video-music.mp4");
       try {
         if (process.env.SKIP_MUSIC === "1") {

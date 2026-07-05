@@ -157,7 +157,8 @@ export default function Home() {
   const [smartEdit, setSmartEdit] = useState(false);
   const [autoCut, setAutoCut] = useState(false); // (Fase 9) AutoCut AI — OFF por padrão
   const [improveAudio, setImproveAudio] = useState(false); // (Fase 15E.1) Limpeza de áudio - OFF por padrão
-    const [captionsEnabled, setCaptionsEnabled] = useState(false);
+  const [musicOn, setMusicOn] = useState(false);
+     const [captionsEnabled, setCaptionsEnabled] = useState(false);
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("classico");
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string>("");
@@ -247,6 +248,7 @@ window.scrollTo({ top: 0, behavior: "smooth" });
     setLoading(true);
     try {
       const fd = new FormData();
+      fd.append("musicOn", musicOn ? "1" : "0");
 
       // imagens: otimiza e anexa (caminho idêntico ao das fases anteriores)
       if (files.length > 0) {
@@ -470,6 +472,15 @@ disabled={loading}
 Melhorar áudio automaticamente
 </label>
 
+<label style={styles.ownMusicRow}>
+<input
+type="checkbox"
+checked={musicOn}
+onChange={(e) => setMusicOn(e.target.checked)}
+disabled={loading}
+/>
+Música de fundo
+</label>
         <button
           onClick={handleSubmit}
           disabled={loading || !hasMedia}

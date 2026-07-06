@@ -160,6 +160,9 @@ export default function Home() {
   const [musicOn, setMusicOn] = useState(false);
      const [captionsEnabled, setCaptionsEnabled] = useState(false);
   const [captionStyle, setCaptionStyle] = useState<CaptionStyle>("classico");
+// Fase 1 — Editor de Legendas
+const [showSubtitleEditor, setShowSubtitleEditor] = useState(false);
+const [editableSubtitles, setEditableSubtitles] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string>("");
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -438,10 +441,34 @@ onStyleChange={setCaptionStyle}
 disabled={!captionsAllowed}
 disabledReason="Legendas automáticas disponíveis para 15s e 30s nesta fase."
 />
-        <p style={styles.fileHint}>
-          {caption.length}/{MAX_CAPTION_LEN} — aparece na parte de baixo do vídeo
-        </p>
+<CaptionControls
+enabled={captionsEnabled}
+onEnabledChange={setCaptionsEnabled}
+style={captionStyle}
+onStyleChange={setCaptionStyle}
+disabled={!captionsAllowed}
+disabledReason="Legendas automáticas disponíveis para 15s e 30s nesta fase."
+/>
 
+<button
+type="button"
+onClick={() => setShowSubtitleEditor(true)}
+disabled={!captionsEnabled}
+style={{
+marginTop: 12,
+padding: "10px 16px",
+borderRadius: 8,
+cursor: "pointer",
+}}
+>
+✏️ Editar Legendas
+</button>
+
+<p style={styles.fileHint}>
+{caption.length}/{MAX_CAPTION_LEN} — aparece na parte de baixo do vídeo
+</p>
+
+        
         <label style={styles.ownMusicRow}>
           <input
             type="checkbox"

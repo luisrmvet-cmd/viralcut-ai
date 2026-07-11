@@ -544,6 +544,10 @@ videoUrl={videoUrl}
 subtitles={editableSubtitles}
 onChange={setEditableSubtitles}
 onClose={() => setShowSubtitleEditor(false)}
+onApply={(subs) => {
+setEditableSubtitles(subs);
+alert("Legendas editadas prontas para renderização.");
+}}
 />
 
 </div>

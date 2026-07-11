@@ -14,6 +14,7 @@ interface SubtitleEditorProps {
   subtitles: any[];
   onChange: (subs: any[]) => void;
   onClose: () => void;
+  onApply: (subs: any[]) => void;
 }
 
 // Leitura tolerante das legendas antigas (não muta o estado do pai).
@@ -47,6 +48,7 @@ export default function SubtitleEditor({
   subtitles,
   onChange,
   onClose,
+  onApply,
 }: SubtitleEditorProps) {
   // onChange já faz parte do contrato desta fase (usado plenamente na próxima).
   // Referência inofensiva evita warning de prop não usada em lint estrito.
@@ -104,20 +106,20 @@ export default function SubtitleEditor({
           <strong style={{ fontSize: 15 }}>Editor de Legendas</strong>
           <div style={{ display: "flex", gap: 8 }}>
             <button
-              type="button"
-              disabled
-              title="Disponível na próxima fase"
-              style={{
-                background: "#2a2f3a",
-                color: "#8b8f98",
-                border: "1px solid #333842",
-                borderRadius: 6,
-                padding: "8px 14px",
-                fontSize: 13,
-                cursor: "not-allowed",
-              }}
+            type="button"
+            onClick={() => onApply(list)}
+            disabled={list.length === 0}
+            style={{
+            background: list.length === 0 ? "#2a2f3a" : "#2563eb",
+            color: list.length === 0 ? "#8b8f98" : "#ffffff",
+            border: "1px solid #333842",
+            borderRadius: 6,
+            padding: "8px 14px",
+            fontSize: 13,
+            cursor: list.length === 0 ? "not-allowed" : "pointer",
+            }}
             >
-              Aplicar (disponível na próxima fase)
+            Aplicar Legendas ao Vídeo
             </button>
             <button
               type="button"

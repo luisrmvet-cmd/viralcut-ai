@@ -9,6 +9,8 @@ import SuccessScreen from "./components/SuccessScreen";
 import CaptionControls from "./components/CaptionControls";
 import ViralContentPanel from "./components/ViralContentPanel";
 import type { CaptionStyle } from "./lib/captions";
+import SubtitleEditor from "./components/SubtitleEditor";
+
 const DURATIONS = [15, 30, 45, 60] as const;
 type Duration = (typeof DURATIONS)[number];
 
@@ -310,6 +312,9 @@ fd.append("captionStyle", captionStyle);
       }
       if (videoUrl) URL.revokeObjectURL(videoUrl);
       setVideoUrl(data.url);
+      setEditableSubtitles(
+Array.isArray(data.subtitles) ? data.subtitles : []
+);
       setHistoryKey((k) => k + 1);
       setStatus("Vídeo gerado!");
     } catch (e) {
@@ -433,14 +438,7 @@ fd.append("captionStyle", captionStyle);
           disabled={loading}
           style={styles.captionInput}
         />
-        <CaptionControls
-enabled={captionsEnabled}
-onEnabledChange={setCaptionsEnabled}
-style={captionStyle}
-onStyleChange={setCaptionStyle}
-disabled={!captionsAllowed}
-disabledReason="Legendas automáticas disponíveis para 15s e 30s nesta fase."
-/>
+       
 <CaptionControls
 enabled={captionsEnabled}
 onEnabledChange={setCaptionsEnabled}
@@ -539,11 +537,19 @@ setHistoryKey((k) => k + 1);
 
 
 <VideoHistory refreshKey={historyKey} />
-      </div>
-    </main>
-  );
-}
 
+<SubtitleEditor
+open={showSubtitleEditor}
+videoUrl={videoUrl}
+subtitles={editableSubtitles}
+onChange={setEditableSubtitles}
+onClose={() => setShowSubtitleEditor(false)}
+/>
+
+</div>
+</main>
+);
+}
 const styles: Record<string, React.CSSProperties> = {
   page: {
     minHeight: "100vh",

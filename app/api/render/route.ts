@@ -952,6 +952,12 @@ export async function POST(req: NextRequest) {
   const jobId = randomUUID();
   const tmpDir = path.join(os.tmpdir(), "viralcut-renders", jobId);
   const blobUrlsToDelete: string[] = [];
+  let responseSubtitles: Array<{
+id: string;
+text: string;
+start: number;
+end: number;
+}> = [];
 
   try {
     const form = await req.formData();
@@ -1276,6 +1282,12 @@ await mixBackgroundMusic(videoForMusic, musicPath, withMusicPath, improveAudio);
         await extractAudioForCaptions(videoForMusic, asrAudioPath);
 
         const words = await transcribeWords(asrAudioPath, { language: "pt" });
+        responseSubtitles = words.map((w, index) => ({
+id: `subtitle-${index}`,
+text: String(w.word ?? ""),
+start: Number(w.start ?? 0),
+end: Number(w.end ?? w.start ?? 0),
+}));
         console.log(`[captions] palavras transcritas: ${words.length}`);
 
         if (words.length > 0) {
@@ -1315,7 +1327,11 @@ contentType: "video/mp4",
 });
 
 console.log(`[perf] blob-upload: ${Date.now() - tBlob}ms`);
-return NextResponse.json({ ok: true, url: uploaded.url });
+return NextResponse.json({
+ok: true,
+url: uploaded.url,
+subtitles: responseSubtitles,
+});
 } catch (e) {
 if (process.env.NODE_ENV === "production") throw e;
 
@@ -1324,6 +1340,7 @@ return NextResponse.json({
 ok: true,
 url: `data:video/mp4;base64,${videoBuffer.toString("base64")}`,
 local: true,
+subtitles: responseSubtitles,
 });
 }
 } catch (err) {

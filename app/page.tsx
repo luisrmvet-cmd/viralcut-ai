@@ -544,10 +544,37 @@ videoUrl={videoUrl}
 subtitles={editableSubtitles}
 onChange={setEditableSubtitles}
 onClose={() => setShowSubtitleEditor(false)}
-onApply={(subs) => {
+onApply={async (subs) => {
 setEditableSubtitles(subs);
-alert("Legendas editadas prontas para renderização.");
+
+try {
+const response = await fetch("/api/apply-subtitles", {
+method: "POST",
+headers: {
+"Content-Type": "application/json",
+},
+body: JSON.stringify({
+videoUrl,
+subtitles: subs,
+}),
+});
+
+const result = await response.json();
+
+if (!response.ok) {
+alert(result.error ?? "Erro ao enviar as legendas.");
+return;
+}
+
+alert(
+`${result.message}\n\nTotal de legendas: ${result.subtitleCount}`
+);
+} catch (error) {
+console.error(error);
+alert("Erro ao conectar com a rota de legendas.");
+}
 }}
+
 />
 
 </div>
